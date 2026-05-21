@@ -26,16 +26,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   async function signIn({ email, password }: SignInCredentials) {
     const response = await api.post('/sessions', { email, password });
-    const { token, user: userData } = response.data;
+    const { user: userData } = response.data;
 
-    localStorage.setItem('@SAGE:token', token);
     localStorage.setItem('@SAGE:user', JSON.stringify(userData));
 
     setUser(userData);
   }
 
   const signOut = () => {
-    localStorage.removeItem('@SAGE:token');
     localStorage.removeItem('@SAGE:user');
     setUser(null);
   };

@@ -177,20 +177,9 @@ export function Reports() {
         params.departmentId = currentDepartmentId;
       }
 
-      // Tenta recuperar o token de forma segura da sessão estruturada
-      const storageUser = localStorage.getItem('@SAGE:user');
-      let token = null;
-      if (storageUser) {
-        const parsed = JSON.parse(storageUser);
-        token = parsed.token || parsed.state?.token; 
-      }
-
       const response = await api.get('/demands/reports/export-pdf', {
         params,
-        responseType: 'blob',
-        headers: {
-          ...(token && { Authorization: `Bearer ${token}` })
-        }
+        responseType: 'blob'
       });
 
       // Evita o falso positivo de download caso o backend envie uma mensagem de erro convertida em blob

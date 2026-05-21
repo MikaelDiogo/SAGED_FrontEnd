@@ -106,10 +106,7 @@ export function Demands() {
   const fetchDemands = useCallback(async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('@SAGE:token');
-      const response = await api.get<Demand[]>('/demands', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get<Demand[]>('/demands');
       setAllDemands(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       const error = err as AxiosError;
@@ -125,10 +122,7 @@ export function Demands() {
     const loadData = async () => {
       await fetchDemands();
       try {
-        const token = localStorage.getItem('@SAGE:token');
-        const res = await api.get<Department[]>('/departments', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await api.get<Department[]>('/departments');
         if (!isMounted) return;
 
         const fetchedDepts = res.data || [];
@@ -192,12 +186,9 @@ export function Demands() {
     setAllDemands(updatedDemands);
 
     try {
-      const token = localStorage.getItem('@SAGE:token');
       await api.patch(`/demands/${draggableId}/status`, {
         status: newStatus,
         description: "Movimentação de cartão realizada via Quadro Kanban SAGE"
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
       });
     } catch (err) {
       console.error("Erro ao atualizar status via Drag&Drop:", err);

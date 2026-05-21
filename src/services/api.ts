@@ -2,15 +2,11 @@ import axios from 'axios';
 
 export const api = axios.create({
   baseURL: 'http://localhost:3333',
+  withCredentials: true,
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('@SAGE:token');
   const userJson = localStorage.getItem('@SAGE:user');
-
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
 
   if (userJson) {
     try {
@@ -28,9 +24,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Trata o 401 de forma controlada sem gerar loops infinitos
-    if (error.response?.status === 401 && localStorage.getItem('@SAGE:token')) {
-      localStorage.removeItem('@SAGE:token');
+    if (error.response?.status === 401) {
       localStorage.removeItem('@SAGE:user');
       window.location.href = '/login'; 
     }

@@ -24,6 +24,7 @@ export function Login() {
     try {
       if (!auth) throw new Error("Contexto de autenticação não carregado");
       
+      // O cookie HTTPOnly será injetado automaticamente pelo navegador aqui
       await auth.signIn({ email, password });
 
       notifications.show({
@@ -32,19 +33,20 @@ export function Login() {
         color: 'green',
       });
 
-      // Recupera o usuário salvo pelo contexto para checar o nível de acesso
+      // Buscamos o usuário atualizado do localStorage após o contexto salvar
       const storedUser = localStorage.getItem('@SAGE:user');
       const currentUser = storedUser ? JSON.parse(storedUser) : null;
       const role = currentUser?.role?.trim().toUpperCase();
 
-      // Redirecionamento baseado no nível de privilégio
+      // Redirecionamento baseado no nível de privilégio (RBAC)
       if (role === 'ADMIN' || role === 'ADMIN_GERAL') {
         navigate('/selecionar-unidade');
       } else {
         navigate('/dashboard');
       }
       
-    } catch {
+    } catch (error) {
+      console.error(error);
       notifications.show({
         title: 'Falha no acesso',
         message: 'E-mail ou senha incorretos. Verifique suas credenciais.',

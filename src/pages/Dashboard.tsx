@@ -53,10 +53,7 @@ export function Dashboard() {
     async function loadDemands() {
       setLoading(true);
       try {
-        const token = localStorage.getItem('@SAGE:token');
-        const response = await api.get<Demand[]>('/demands', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const response = await api.get<Demand[]>('/demands');
         setAllDemands(Array.isArray(response.data) ? response.data : []);
       } catch (error) {
         console.error("Erro ao buscar demandas para o painel:", error);

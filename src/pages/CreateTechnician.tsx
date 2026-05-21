@@ -28,8 +28,8 @@ interface Department {
 }
 
 const TECH_SPECIALTIES = [
-  { value: '01', label: '01 - REDES / INTERNET' },
-  { value: '02', label: '02 - HARDWARE / MANUTENÇÃO' },
+  { value: '01', label: '01 - HARDWARE / MANUTENÇÃO' },
+  { value: '02', label: '02 - REDES / INTERNET' },
   { value: '03', label: '03 - SOFTWARE / SISTEMAS' },
 ];
 
@@ -82,11 +82,9 @@ export function CreateTechnician() {
     const loadData = async () => {
       try {
         setFetching(true);
-        const token = localStorage.getItem('@SAGE:token');
-        const config = { headers: { Authorization: `Bearer ${token}` } };
 
         // 1. Busca as secretarias do sistema
-        const resDepts = await api.get<Department[]>('/departments', config);
+        const resDepts = await api.get<Department[]>('/departments');
         
         if (isMounted && Array.isArray(resDepts.data)) {
           setDepartments(
@@ -107,7 +105,7 @@ export function CreateTechnician() {
         // 2. Busca os usuários filtrando pela Role ou rota correspondente do SAGED
         try {
           // Se sua API listar todos em /users, podemos filtrar no frontend ou usar query params se o backend aceitar (ex: /users?role=TECNICO)
-          const resUsers = await api.get<TechnicianUser[]>('/users', config);
+          const resUsers = await api.get<TechnicianUser[]>('/users');
           
           if (isMounted && Array.isArray(resUsers.data)) {
             // Filtra para exibir na tabela apenas quem possui o papel de técnico
@@ -135,8 +133,6 @@ export function CreateTechnician() {
     setLoading(true);
     try {
       const targetedDepartment = isGeneralAdmin ? values.departmentId : loggedUser?.departmentId;
-      const token = localStorage.getItem('@SAGE:token');
-      const config = { headers: { Authorization: `Bearer ${token}` } };
 
       const payload = {
         name: values.name,
@@ -148,14 +144,14 @@ export function CreateTechnician() {
         departmentId: targetedDepartment
       };
 
-      await api.post('/users', payload, config);
+      await api.post('/users', payload);
       
       alert('Técnico cadastrado com sucesso!');
       form.reset();
       
       // Atualiza a tabela após o cadastro bem-sucedido
       try {
-        const { data } = await api.get<TechnicianUser[]>('/users', config);
+        const { data } = await api.get<TechnicianUser[]>('/users');
         if (Array.isArray(data)) {
           setTechnicians(data.filter(user => user.role?.trim().toUpperCase() === 'TECNICO'));
         }
@@ -305,3 +301,5 @@ export function CreateTechnician() {
     </Container>
   );
 }
+
+//
