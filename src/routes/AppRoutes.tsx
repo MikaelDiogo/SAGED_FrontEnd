@@ -14,13 +14,12 @@ import { ProtectedRoute } from '../components/ProtectedRoute';
 import { Center, Loader } from '@mantine/core';
 
 function InitialRedirect() {
-  const storedUser = localStorage.getItem('@SAGE:user');
-  if (!storedUser) return <Navigate to="/login" replace />;
-
-  const currentUser = JSON.parse(storedUser);
-  const role = currentUser?.role?.trim().toUpperCase();
-
-  if (role === 'ADMIN' || role === 'ADMIN_GERAL') {
+  const { user } = useContext(AuthContext);
+  if (!user) return <Navigate to="/login" replace />;
+  
+  const role = user.role?.trim().toUpperCase();
+  
+  if (role === 'ADMIN_GERAL') {
     return <Navigate to="/selecionar-unidade" replace />;
   }
 
