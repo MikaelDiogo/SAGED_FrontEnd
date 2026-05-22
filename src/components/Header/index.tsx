@@ -3,9 +3,10 @@ import {
 } from '@mantine/core';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { IconLogout, IconUserCircle } from '@tabler/icons-react';
-import { useMemo } from 'react';
+import { useMemo, useContext } from 'react';
 import logo from '../../assets/logo.png';
 import type { User } from '../../types';
+import { AuthContext } from '../../contexts/AuthContext';
 
 interface HeaderProps {
   opened: boolean;
@@ -15,6 +16,7 @@ interface HeaderProps {
 export function Header({ opened, toggle }: HeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { signOut } = useContext(AuthContext);
 
   // 1. Recupera o usuário logado para validar a role
   const loggedUser = useMemo<User | null>(() => {
@@ -46,11 +48,8 @@ export function Header({ opened, toggle }: HeaderProps) {
 
   // Função para limpar a sessão e deslogar do SAGE
   const handleLogout = () => {
-    localStorage.removeItem('@SAGE:token');
-    localStorage.removeItem('@SAGE:user');
-    
-    navigate('/', { replace: true });
-    window.location.reload();
+    signOut();
+    navigate('/login', { replace: true });
   };
 
   return (
