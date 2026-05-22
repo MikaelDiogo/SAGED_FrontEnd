@@ -5,7 +5,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { IconLogout, IconUserCircle } from '@tabler/icons-react';
 import { useMemo, useContext } from 'react';
 import logo from '../../assets/logo.png';
-import type { User } from '../../types';
 import { AuthContext } from '../../contexts/AuthContext';
 
 interface HeaderProps {
@@ -16,17 +15,13 @@ interface HeaderProps {
 export function Header({ opened, toggle }: HeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signOut } = useContext(AuthContext);
+  const { user, signOut } = useContext(AuthContext);
 
-  // 1. Recupera o usuário logado para validar a role
-  const loggedUser = useMemo<User | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    return storageUser ? JSON.parse(storageUser) : null;
-  }, []);
+  const loggedUser = user;
 
   const isAdmin = useMemo(() => {
     const role = loggedUser?.role?.trim().toUpperCase();
-    return role === 'ADMIN' || role === 'ADMIN_GERAL';
+    return role === 'ADMIN_GERAL';
   }, [loggedUser]);
 
   // 2. Monta os links do menu dinamicamente com base nas permissões

@@ -3,9 +3,9 @@ export interface User {
   name: string;
   email: string;
   role: 'ADMIN_GERAL' | 'ADMIN_SETOR' | 'TECNICO_LIDER' | 'TECNICO';
-  is_sector_leader: boolean;
   departmentId?: string;
-  tech_type_code?: string; 
+  tech_type_code?: string;
+  is_sector_leader?: boolean;
 }
 
 export interface SignInCredentials {
@@ -15,15 +15,23 @@ export interface SignInCredentials {
 
 export interface Department {
   id: string;
+  code: string;
   name: string;
-  code?: string;
 }
+
+export interface Specialty {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export type StatusType = 'A_FAZER' | 'EM_ANDAMENTO' | 'CONCLUIDO' | 'INTERROMPIDO' | 'CANCELADO';
 
 export interface Demand {
   id: string;
   title: string;
   description: string;
-  status: 'A_FAZER' | 'EM_ANDAMENTO' | 'CONCLUIDO' | 'INTERROMPIDO' | 'CANCELADO';
+  status: StatusType;
   protocol: string;
   asset_tag?: string;
   techTypeCode: string;

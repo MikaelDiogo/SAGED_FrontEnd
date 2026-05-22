@@ -10,8 +10,8 @@ import {
 } from '@mantine/core';
 import { IconNetwork, IconDeviceDesktop} from '@tabler/icons-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useMemo } from 'react';
-import type { User } from '../types';
+import { useMemo, useContext } from 'react';
+import { AuthContext } from '../contexts/AuthContext';
 
 // Definição dos dados das filas (Cargos)
 const cargosMock = [
@@ -34,15 +34,13 @@ const cargosMock = [
 export function SelectQueue() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useContext(AuthContext);
   
-  const loggedUser = useMemo<User | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    return storageUser ? JSON.parse(storageUser) : null;
-  }, []);
+  const loggedUser = user;
 
   const isAdminGeral = useMemo(() => {
     const role = loggedUser?.role?.trim().toUpperCase();
-    return role === 'ADMIN_GERAL' || role === 'ADMIN';
+    return role === 'ADMIN_GERAL';
   }, [loggedUser]);
 
   const isLiderSetor = useMemo(() => {

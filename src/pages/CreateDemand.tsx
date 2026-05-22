@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useContext } from 'react';
 import { Container, Title, Paper, TextInput, Textarea, Select, Button, Stack } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api } from '../services/api';
+import { AuthContext } from '../contexts/AuthContext';
 
 interface Specialty {
   id: string;
@@ -37,10 +38,8 @@ export function CreateDemand() {
   const [submitting, setSubmitting] = useState(false);
 
   // Recupera e tipa o usuário logado do ecossistema SAGE
-  const loggedUser = useMemo<LoggedUser | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    return storageUser ? JSON.parse(storageUser) : null;
-  }, []);
+  const { user } = useContext(AuthContext);
+  const loggedUser = user as unknown as LoggedUser | null;
 
   const isAdminGeral = useMemo(() => {
     return loggedUser?.role?.trim().toUpperCase() === 'ADMIN_GERAL';

@@ -4,12 +4,13 @@ import {
 } from '@mantine/core'; 
 import { IconArrowLeft, IconPlus } from '@tabler/icons-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { api } from '../services/api';
 import { DemandCard } from '../components/DemandCard';
 import { DemandModal } from '../components/DemandModal';
 import { AxiosError } from 'axios';
+import { AuthContext } from '../contexts/AuthContext';
 import type { User as BaseUser } from '../types';
 
 export type StatusType = 'A_FAZER' | 'EM_ANDAMENTO' | 'CONCLUIDO' | 'INTERROMPIDO' | 'CANCELADO';
@@ -86,10 +87,8 @@ export function Demands() {
   
   const [currentUnitName, setCurrentUnitName] = useState('CARREGANDO PAINEL...');
 
-  const loggedUser = useMemo<ExtendedUser | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    return storageUser ? JSON.parse(storageUser) as ExtendedUser : null;
-  }, []);
+  const { user } = useContext(AuthContext);
+  const loggedUser = user as ExtendedUser | null;
 
   const roleUpper = useMemo(() => loggedUser?.role?.trim().toUpperCase(), [loggedUser]);
   

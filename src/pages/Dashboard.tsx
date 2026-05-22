@@ -9,9 +9,10 @@ import {
   IconClock, IconBarrierBlock
 } from '@tabler/icons-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useContext } from 'react';
 import { api } from '../services/api';
 import { StatCard } from '../components/StatCard';
+import { AuthContext } from '../contexts/AuthContext';
 import { TechActivity } from '../components/TechActivity';
 import type { Demand, StatusType } from '../pages/Demands';
 import type { User as BaseUser } from '../types';
@@ -33,17 +34,13 @@ export function Dashboard() {
   const unitId = searchParams.get('unit');
   const unitName = searchParams.get('name') || 'Secretaria Selecionada';
 
-  // Recupera as credenciais do usuário do localStorage do SAGED
-  const loggedUser = useMemo<ExtendedUser | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    return storageUser ? JSON.parse(storageUser) as ExtendedUser : null;
-  }, []);
+  const { user } = useContext(AuthContext);
+  const loggedUser = user as ExtendedUser | null;
 
   const roleUpper = useMemo(() => loggedUser?.role?.trim().toUpperCase(), [loggedUser]);
   
   // Mapeamento das permissões de acordo com as especificações do Swagger
-  // UNIFICAÇÃO: Aceita ADMIN ou ADMIN_GERAL como gestor global
-  const isAdminGeral = useMemo(() => roleUpper === 'ADMIN_GERAL' || roleUpper === 'ADMIN', [roleUpper]);
+  const isAdminGeral = useMemo(() => roleUpper === 'ADMIN_GERAL', [roleUpper]);
   const isTechnician = useMemo(() => roleUpper === 'TECNICO', [roleUpper]);
   const hasSectorView = useMemo(() => {
     return roleUpper === 'ADMIN_SETOR' || roleUpper === 'TECNICO_LIDER' || loggedUser?.is_sector_leader === true;

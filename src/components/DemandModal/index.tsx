@@ -1,5 +1,6 @@
 import { Modal, Button, Group, Text, Badge, Stack, TextInput, Textarea, Select, Divider, Box, SimpleGrid, Alert } from '@mantine/core';
 import { IconHammer, IconBuildingCommunity, IconUserCheck, IconAlertCircle, IconUser } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';    
 import { api } from '../../services/api';
 import type { Demand, StatusType } from '../../pages/Demands';
@@ -60,7 +61,11 @@ export function DemandModal({ opened, onClose, demand, onUpdate, departments, is
       onClose();
     } catch (error) {
       console.error("Erro ao assumir demanda:", error);
-      alert("Erro ao assumir o chamado. Verifique sua conexão ou permissões.");
+      notifications.show({
+        title: 'Erro operacional',
+        message: 'Não foi possível assumir o chamado. Verifique sua conexão.',
+        color: 'red',
+      });
     } finally {
       setLoading(false);
     }
@@ -70,7 +75,11 @@ export function DemandModal({ opened, onClose, demand, onUpdate, departments, is
     if (!demand) return;
 
     if ((status === 'INTERROMPIDO' || status === 'CANCELADO') && observacao.trim().length < 15) {
-      alert('Para alterar o status para Interrompido ou Cancelado, informe um relatório detalhado com no mínimo 15 caracteres.');
+      notifications.show({
+        title: 'Relatório insuficiente',
+        message: 'Para interromper ou cancelar, informe um relatório com no mínimo 15 caracteres.',
+        color: 'orange',
+      });
       return;
     }
 
@@ -85,7 +94,11 @@ export function DemandModal({ opened, onClose, demand, onUpdate, departments, is
       onClose();
     } catch (error) {
       console.error("Erro ao salvar alterações na demanda:", error);
-      alert("Erro ao salvar dados. Verifique a conexão com o servidor e os privilégios do seu usuário.");
+      notifications.show({
+        title: 'Falha na atualização',
+        message: 'Erro ao salvar dados. Verifique sua conexão e permissões.',
+        color: 'red',
+      });
     } finally {
       setLoading(false);
     }

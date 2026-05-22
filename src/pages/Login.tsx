@@ -34,12 +34,10 @@ export function Login() {
       });
 
       // Buscamos o usuário atualizado do localStorage após o contexto salvar
-      const storedUser = localStorage.getItem('@SAGE:user');
-      const currentUser = storedUser ? JSON.parse(storedUser) : null;
-      const role = currentUser?.role?.trim().toUpperCase();
+      const role = auth.user?.role?.trim().toUpperCase();
 
       // Redirecionamento baseado no nível de privilégio (RBAC)
-      if (role === 'ADMIN' || role === 'ADMIN_GERAL') {
+      if (role === 'ADMIN_GERAL') {
         navigate('/selecionar-unidade');
       } else {
         navigate('/dashboard');
