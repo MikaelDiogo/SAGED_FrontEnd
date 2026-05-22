@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Container, Title, Paper, TextInput, Select, Button, Stack, Grid, Table, Text, Badge, Center, Loader, Box } from '@mantine/core';
+import { useState, useEffect } from 'react';
+import { Container, Title, Paper, TextInput, Select, Button, Stack, Grid, Text, Center, Loader, Box } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api } from '../services/api';
 
@@ -15,16 +15,6 @@ interface Department {
   name: string;
 }
 
-interface TechnicianUser {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  tech_type_code: string;
-  departmentId?: string;
-  department?: Department;
-}
-
 export function CreateTechnician() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -38,27 +28,6 @@ export function CreateTechnician() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [technicians, setTechnicians] = useState<TechnicianUser[]>([]);
-
-  const roleLabels = useMemo<Record<string, string>>(() => ({
-    ADMIN_GERAL: 'Administrador Geral',
-    ADMIN: 'Administrador Geral',
-    ADMIN_SETOR: 'Líder de Unidade',
-    TECNICO_LIDER: 'Técnico Líder',
-    TECNICO: 'Técnico Operacional',
-  }), []);
-
-  const fetchTechnicians = async () => {
-    try {
-      const response = await api.get<TechnicianUser[]>('/users');
-      const staff = response.data.filter(u => 
-        ['TECNICO', 'TECNICO_LIDER', 'ADMIN_SETOR'].includes(u.role?.trim().toUpperCase())
-      );
-      setTechnicians(staff);
-    } catch (error) {
-      console.error("Erro ao buscar lista de técnicos:", error);
-    }
-  };
 
   useEffect(() => {
     async function loadInitialData() {
@@ -69,7 +38,6 @@ export function CreateTechnician() {
         ]);
         setSpecialties(specialtiesResponse.data);
         setDepartments(departmentsResponse.data);
-        await fetchTechnicians();
       } catch (error) {
         notifications.show({
           title: 'Erro ao carregar dados',
@@ -117,7 +85,6 @@ export function CreateTechnician() {
       setPassword('');
       setSpecialtyCode(null);
       setDepartmentId(null);
-      await fetchTechnicians();
     } catch (error) {
       notifications.show({
         title: 'Erro no cadastro',
@@ -213,47 +180,14 @@ export function CreateTechnician() {
               {loadingData ? (
                 <Center h={200}><Loader color="green.8" /></Center>
               ) : (
-                <Table verticalSpacing="sm" highlightOnHover>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Profissional</Table.Th>
-                      <Table.Th>Secretaria</Table.Th>
-                      <Table.Th>Especialidade</Table.Th>
-                      <Table.Th>Nível</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {technicians.length === 0 ? (
-                      <Table.Tr>
-                        <Table.Td colSpan={4}>
-                          <Text c="dimmed" ta="center" size="sm" py="xl">Nenhum técnico cadastrado para esta visualização.</Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    ) : (
-                      technicians.map((tech) => (
-                        <Table.Tr key={tech.id}>
-                          <Table.Td>
-                            <Stack gap={0}>
-                              <Text size="sm" fw={700}>{tech.name}</Text>
-                              <Text size="xs" c="dimmed">{tech.email}</Text>
-                            </Stack>
-                          </Table.Td>
-                          <Table.Td><Text size="xs" fw={600}>{departments.find(d => d.id === tech.departmentId)?.name || 'Não Vinculado'}</Text></Table.Td>
-                          <Table.Td>
-                            <Badge color="blue" variant="light" size="xs" radius="xs">
-                              {specialties.find(s => s.code === tech.tech_type_code)?.name || 'Geral'}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Badge color="green.8" variant="outline" size="xs">
-                              {roleLabels[tech.role] || tech.role}
-                            </Badge>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))
-                    )}
-                  </Table.Tbody>
-                </Table>
+                <Center h={200} style={{ flexDirection: 'column' }}>
+                  <Text c="dimmed" size="sm" fw={600}>
+                    A listagem de profissionais não está disponível nesta versão.
+                  </Text>
+                  <Text c="dimmed" size="xs">
+                    Aguardando implementação do endpoint de listagem no SAGED API.
+                  </Text>
+                </Center>
               )}
             </Paper>
           </Grid.Col>
