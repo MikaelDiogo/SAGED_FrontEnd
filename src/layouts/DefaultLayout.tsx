@@ -15,7 +15,7 @@ export function DefaultLayout() {
     if (!storageUser) return false;
     const user = JSON.parse(storageUser) as User;
     const role = user?.role?.trim().toUpperCase();
-    return role === 'ADMIN' || role === 'ADMIN_GERAL';
+    return role === 'ADMIN' || role === 'ADMIN_GERAL'; // Já estava consistente, mas mantemos atenção aqui
   }, []);
 
   return (
@@ -38,7 +38,7 @@ export function DefaultLayout() {
           label="Painel de Visualização" 
           c="white" 
           fw={600}
-          onClick={() => { navigate('/dashboard'); close(); }} 
+          onClick={() => { navigate('/selecionar-unidade'); close(); }} 
         />
         <NavLink 
           label="Quadro de Demandas" 

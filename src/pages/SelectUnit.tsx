@@ -9,10 +9,26 @@ import { useState, useEffect, useMemo } from 'react';
 import { api } from '../services/api';
 import type { User } from '../types';
 
+// Espelhamento local dos status do SAGE para evitar imports cruzados com o backend
+export const DemandStatus = {
+  A_FAZER: "A_FAZER",
+  EM_ANDAMENTO: "EM_ANDAMENTO",
+  CONCLUIDO: "CONCLUIDO",
+  INTERROMPIDO: "INTERROMPIDO",
+  CANCELADO: "CANCELADO",
+} as const;
+
+interface Demand {
+  id: string;
+  status: string; 
+}
+
 interface Department {
   id: string;
   name: string;
   code: string;
+  demands?: Demand[]; 
+  openDemands?: number; 
 }
 
 export function SelectUnit() {
@@ -21,13 +37,11 @@ export function SelectUnit() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Recupera o usuário logado de forma reativa
   const loggedUser = useMemo<User | null>(() => {
     const storedUser = localStorage.getItem('@SAGE:user');
     return storedUser ? JSON.parse(storedUser) : null;
   }, []);
 
-  // Nova constante baseada no retorno real da sua API (ADMIN_GERAL)
   const isAdmin = useMemo(() => {
     const role = loggedUser?.role?.trim().toUpperCase();
     return role === 'ADMIN' || role === 'ADMIN_GERAL';
@@ -40,8 +54,25 @@ export function SelectUnit() {
         const response = await api.get<Department[]>('/departments');
         const data = Array.isArray(response.data) ? response.data : [];
 
+        // 📊 Filtra e calcula dinamicamente as demandas baseadas no Status local
+        const processedData = data.map(dept => {
+          const demandsList = dept.demands || [];
+          
+          const pendingCount = demandsList.filter(demand => {
+            const status = demand.status?.trim().toUpperCase();
+            return status === DemandStatus.A_FAZER || 
+                   status === DemandStatus.EM_ANDAMENTO || 
+                   status === DemandStatus.INTERROMPIDO;
+          }).length;
+
+          return {
+            ...dept,
+            openDemands: pendingCount 
+          };
+        });
+
         // Ordenação Crescente Inteligente por código (01, 01.01, 02...)
-        const orderedData = data.sort((a, b) => 
+        const orderedData = processedData.sort((a, b) => 
           a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
         );
 
@@ -49,11 +80,9 @@ export function SelectUnit() {
         const currentUser: User | null = storedUserRaw ? JSON.parse(storedUserRaw) : null;
         const userRole = currentUser?.role?.trim().toUpperCase();
 
-        // 🟢 CORRIGIDO: Aceita tanto ADMIN quanto ADMIN_GERAL para listar tudo!
         if (userRole === 'ADMIN' || userRole === 'ADMIN_GERAL') {
           setDepartments(orderedData);
         } 
-        // Se for Secretário restrito e possuir vínculo com secretaria
         else if (currentUser && currentUser.departmentId) {
           const myDept = orderedData.filter(dept => dept.id === currentUser.departmentId);
           setDepartments(myDept);
@@ -87,7 +116,7 @@ export function SelectUnit() {
   };
 
   return (
-    <Container size="lg" pt={80} pb="xl">
+    <Container size="lg" pt={100} pb="xl">
       <Stack gap="xl">
         <Box>
           <Title order={1} c="green.9" fw={900} style={{ letterSpacing: '-1px' }}>
@@ -100,7 +129,6 @@ export function SelectUnit() {
           </Text>
         </Box>
 
-        {/* Barra de busca visível para administradores gerais */}
         {isAdmin && (
           <TextInput 
             placeholder="Buscar secretaria pelo nome ou código..." 
@@ -122,15 +150,8 @@ export function SelectUnit() {
           <Center py="xl" style={{ height: '200px' }}><Loader color="green.8" /></Center>
         ) : (
           <SimpleGrid 
-            cols={{ base: 1, sm: 2, md: 2 }} 
+            cols={{ base: 1, sm: 2, md: 3 }} 
             spacing="lg"
-            styles={{
-              root: {
-                display: 'grid',
-                gridAutoRows: '1fr', 
-                alignItems: 'stretch'
-              }
-            }}
           >
             {filteredDepartments.map((dept) => (
               <Box 
@@ -139,7 +160,7 @@ export function SelectUnit() {
                   position: 'relative',
                   display: 'flex',
                   flexDirection: 'column',
-                  height: '100%',
+                  height: '160px', 
                   width: '100%'
                 }}
               >
@@ -180,8 +201,8 @@ export function SelectUnit() {
                     <UnitCard 
                       name={truncateName(dept.name)}
                       manager="Responsável Técnico"
-                      openDemands={0} 
-                      onClick={() => navigate(`/dashboard?unit=${dept.id}&name=${encodeURIComponent(dept.name)}`)}
+                      openDemands={dept.openDemands || 0} 
+                      onClick={() => navigate(`/dashboard?unit=${dept.id}&name=${encodeURIComponent(dept.name)}`)} 
                     />
                   </Box>
                 </Tooltip>
@@ -199,4 +220,4 @@ export function SelectUnit() {
       </Stack>
     </Container>
   );
-} 
+}

@@ -1,221 +1,201 @@
-//
-
-import { 
-  Container, Paper, Title, TextInput, Textarea, 
-  Select, Button, Group, Stack, Divider, Text 
-} from '@mantine/core';
-import { useForm } from '@mantine/form';
-import { useNavigate } from 'react-router-dom';
 import { useState, useEffect, useMemo } from 'react';
-import { IconDeviceFloppy, IconArrowLeft } from '@tabler/icons-react';
+import { Container, Title, Paper, TextInput, Textarea, Select, Button, Stack } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { api } from '../services/api';
-import axios, { AxiosError } from 'axios';
-import type { User } from '../types';
 
-interface Department {
+interface Specialty {
   id: string;
+  code: string;
   name: string;
 }
 
-interface CreateDemandValues {
-  title: string;
-  description: string;
-  departmentId: string;
-  techTypeCode: string;
-  asset_tag: string;
+interface Department {
+  id: string;
+  code: string;
+  name: string;
 }
 
-const TECH_OPTIONS = [
-  { value: '01', label: '01 - HARDWARE / MANUTENÇÃO' },
-  { value: '02', label: '02 - REDES / INTERNET' },
-  { value: '03', label: '03 - SOFTWARE / SISTEMAS' },
-];
+// Interface estendida baseada no UserPublic do Swagger
+interface LoggedUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN_GERAL' | 'ADMIN_SETOR' | 'TECNICO_LIDER' | 'TECNICO';
+  departmentId: string | null;
+}
 
 export function CreateDemand() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [assetTag, setAssetTag] = useState('');
+  const [specialtyCode, setSpecialtyCode] = useState<string | null>(null);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
 
-  const loggedUser = useMemo<User | null>(() => {
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Recupera e tipa o usuário logado do ecossistema SAGE
+  const loggedUser = useMemo<LoggedUser | null>(() => {
     const storageUser = localStorage.getItem('@SAGE:user');
     return storageUser ? JSON.parse(storageUser) : null;
   }, []);
 
-  const isAdmin = useMemo(() => {
-    const role = loggedUser?.role?.trim().toUpperCase();
-    return role === 'ADMIN' || role === 'ADMIN_GERAL';
+  const isAdminGeral = useMemo(() => {
+    return loggedUser?.role?.trim().toUpperCase() === 'ADMIN_GERAL';
   }, [loggedUser]);
 
-  const form = useForm<CreateDemandValues>({
-    initialValues: {
-      title: '',
-      description: '',
-      departmentId: !isAdmin && loggedUser?.departmentId ? loggedUser.departmentId : '',
-      techTypeCode: '',
-      asset_tag: '',
-    },
-    validate: {
-      title: (val) => (val.length < 5 ? 'O título deve ter ao menos 5 caracteres' : null),
-      description: (val) => (val.length < 10 ? 'Forneça uma descrição mais detalhada' : null),
-      departmentId: (val) => (!val ? 'Selecione a secretaria de destino' : null),
-      techTypeCode: (val) => (!val ? 'Selecione a especialidade técnica' : null),
-    },
-  });
-
-  const { initialize: initializeForm } = form;
-
   useEffect(() => {
-    const controller = new AbortController();
-    
-    async function fetchDepartments() {
+    async function loadFormRequirements() {
       try {
-        const { data } = await api.get<Department[]>('/departments', {
-          signal: controller.signal
-        });
-        
-        if (!isAdmin && loggedUser?.departmentId) {
-          const myDept = data.filter(d => d.id === loggedUser.departmentId);
-          setDepartments(myDept);
-          
-          initializeForm({
-            title: '',
-            description: '',
-            departmentId: loggedUser.departmentId,
-            techTypeCode: '',
-            asset_tag: '',
-          });
-        } else {
-          setDepartments(data);
-        }
-      } catch (err) {
-        if (axios.isCancel(err)) return;
+        const [specialtiesRes, departmentsRes] = await Promise.all([
+          api.get<Specialty[]>('/specialties'),
+          isAdminGeral ? api.get<Department[]>('/departments') : Promise.resolve({ data: [] })
+        ]);
 
-        const error = err as AxiosError;
-        if (error.response?.status === 401) {
-          navigate('/login');
+        setSpecialties(specialtiesRes.data);
+        if (isAdminGeral) {
+          setDepartments(departmentsRes.data);
         }
-        console.error('Falha ao carregar secretarias:', error);
+      } catch (error) {
+        notifications.show({
+          title: 'Erro ao carregar formulário',
+          message: 'Não foi possível buscar as parametrizações do SAGE.',
+          color: 'red',
+        });
+      } finally {
+        setLoadingData(false);
       }
     }
+    loadFormRequirements();
+  }, [isAdminGeral]);
 
-    fetchDepartments();
-    return () => controller.abort();
-  }, [isAdmin, loggedUser, navigate, initializeForm]);
+  const handleCreateDemand = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  const handleCreateDemand = async (values: CreateDemandValues) => {
-    setLoading(true);
+    if (!loggedUser?.id) {
+      notifications.show({ message: 'Sessão expirada. Faça login novamente.', color: 'red' });
+      return;
+    }
+
+    if (!specialtyCode) {
+      notifications.show({ message: 'Selecione a categoria do problema', color: 'orange' });
+      return;
+    }
+
+    // Define qual departmentId enviar baseado no papel (RBAC)
+    let targetDepartmentId = isAdminGeral ? selectedDepartmentId : loggedUser.departmentId;
+
+    if (!targetDepartmentId) {
+      notifications.show({ 
+        message: isAdminGeral 
+          ? 'Selecione a secretaria vinculada ao chamado' 
+          : 'Seu usuário não possui uma secretaria vinculada.', 
+        color: 'orange' 
+      });
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      if (!loggedUser?.id) {
-        alert('Sessão expirada. Por favor, faça login novamente.');
-        navigate('/login');
-        return;
-      }
+      // Payload montado exatamente igual ao CreateDemandRequest do Swagger
+      await api.post('/demands', {
+        title,
+        description,
+        departmentId: targetDepartmentId,   // Obrigatório no Swagger (UUID)
+        techTypeCode: specialtyCode,       // Obrigatório no Swagger
+        asset_tag: assetTag || undefined,  // Opcional
+      });
 
-      // Monta o payload exatamente com o que o back-end espera
-      const payload: Record<string, any> = {
-        title: values.title,
-        description: values.description,
-        techTypeCode: values.techTypeCode,
-        departmentId: !isAdmin && loggedUser.departmentId ? loggedUser.departmentId : values.departmentId,
-        senderId: loggedUser.id,
-      };
+      notifications.show({
+        title: 'Chamado Aberto!',
+        message: 'Sua demanda foi registrada e encaminhada para a fila.',
+        color: 'green',
+      });
 
-      // Se o patrimônio foi preenchido, envia. Se for vazio, removemos para evitar string vazia invadindo validações estritas
-      if (values.asset_tag && values.asset_tag.trim() !== '') {
-        payload.asset_tag = values.asset_tag.trim();
-      }
-
-      await api.post('/demands', payload);
-
-      navigate('/dashboard'); 
-    } catch (err) {
-      const error = err as AxiosError<{ message: string }>;
-      const message = error.response?.data?.message || 'Erro inesperado ao criar demanda';
-      alert(message);
+      // Limpa os estados do formulário
+      setTitle('');
+      setDescription('');
+      setAssetTag('');
+      setSpecialtyCode(null);
+      setSelectedDepartmentId(null);
+    } catch (error) {
+      console.error("Erro na API /demands:", error);
+      notifications.show({
+        title: 'Erro ao abrir chamado',
+        message: 'Houve um problema técnico ao processar sua requisição.',
+        color: 'red',
+      });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
   return (
-    <Container size="sm" pt={40} pb={40}>
-      <Stack gap="xs" mb="xl">
-        <Group gap="sm">
-          <Button 
-            variant="subtle" 
-            color="gray" 
-            leftSection={<IconArrowLeft size={16} />} 
-            onClick={() => navigate(-1)}
-            px={0}
-          >
-            Voltar
-          </Button>
-        </Group>
-        <Title order={2} fw={900} c="green.9">
-          NOVA DEMANDA
+    <Container size="sm" pt={100} pb="xl">
+      <Paper withBorder p="xl" radius="sm" shadow="sm">
+        <Title order={3} mb="xl" c="green.9" tt="uppercase" fw={800}>
+          Abrir Nova Demanda / Chamado
         </Title>
-        <Text size="sm" c="dimmed" fw={500}>
-          Gere um novo protocolo para acompanhamento técnico.
-        </Text>
-      </Stack>
 
-      <Paper withBorder p="xl" radius="md" shadow="sm">
-        <form onSubmit={form.onSubmit(handleCreateDemand)}>
-          <Stack gap="lg">
+        <form onSubmit={handleCreateDemand}>
+          <Stack gap="md">
+            {isAdminGeral && (
+              <Select
+                label="Secretaria Vinculada"
+                placeholder={loadingData ? 'Carregando secretarias...' : 'Para qual secretaria é este chamado?'}
+                data={departments.map(d => ({ value: d.id, label: `SEC ${d.code} - ${d.name}` }))}
+                disabled={loadingData}
+                required
+                value={selectedDepartmentId}
+                onChange={setSelectedDepartmentId}
+              />
+            )}
+
             <TextInput
-              label="Título da Solicitação"
-              placeholder="Ex: Falha na conexão do switch principal"
+              label="Título Resumido"
+              placeholder="Ex: Computador da recepção não liga"
               required
-              {...form.getInputProps('title')}
-            />
-
-            <Group grow align="flex-start">
-              <Select
-                label="Secretaria Responsável"
-                placeholder="Selecione o destino"
-                searchable
-                disabled={!isAdmin} 
-                data={departments.map(d => ({ value: d.id, label: d.name.toUpperCase() }))}
-                {...form.getInputProps('departmentId')}
-              />
-
-              <Select
-                label="Tipo de Serviço (TEC)"
-                placeholder="Especialidade"
-                data={TECH_OPTIONS}
-                {...form.getInputProps('techTypeCode')}
-              />
-            </Group>
-
-            <TextInput
-              label="Código de Patrimônio"
-              placeholder="Opcional (Ex: PM-123456)"
-              {...form.getInputProps('asset_tag')}
+              value={title}
+              onChange={(e) => setTitle(e.currentTarget.value)}
             />
 
             <Textarea
-              label="Relatório da Ocorrência"
-              placeholder="Descreva o problema detalhadamente..."
-              minRows={5}
+              label="Descrição Detalhada do Problema"
+              placeholder="Descreva detalhadamente o que está acontecendo..."
               required
-              {...form.getInputProps('description')}
+              minRows={4}
+              value={description}
+              onChange={(e) => setDescription(e.currentTarget.value)}
             />
 
-            <Divider />
+            <TextInput
+              label="Tombamento / Patrimônio do Equipamento (Opcional)"
+              placeholder="Ex: PM-CRA-2026-XXXX"
+              value={assetTag}
+              onChange={(e) => setAssetTag(e.currentTarget.value)}
+            />
 
-            <Group justify="flex-end" gap="md">
-              <Button variant="subtle" color="gray" onClick={() => navigate(-1)} disabled={loading}>
-                Descartar
-              </Button>
-              <Button 
-                type="submit" 
-                color="green.8" 
-                loading={loading}
-                leftSection={<IconDeviceFloppy size={20} />}
-              >
-                Gerar Protocolo
-              </Button>
-            </Group>
+            <Select
+              label="Tipo de Atendimento Necessário"
+              placeholder={loadingData ? 'Carregando categorias...' : 'Selecione a categoria'}
+              data={specialties.map(spec => ({ value: spec.code, label: spec.name }))}
+              disabled={loadingData}
+              required
+              value={specialtyCode}
+              onChange={setSpecialtyCode}
+            />
+
+            <Button 
+              type="submit" 
+              color="green.8" 
+              loading={submitting}
+              mt="md"
+              style={{ fontWeight: 700 }}
+            >
+              Enviar Chamado
+            </Button>
           </Stack>
         </form>
       </Paper>

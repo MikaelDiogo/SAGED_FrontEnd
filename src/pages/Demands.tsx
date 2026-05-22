@@ -17,7 +17,7 @@ export type StatusType = 'A_FAZER' | 'EM_ANDAMENTO' | 'CONCLUIDO' | 'INTERROMPID
 interface ExtendedUser extends BaseUser {
   role: 'ADMIN_GERAL' | 'ADMIN_SETOR' | 'TECNICO_LIDER' | 'TECNICO';
   tech_type_code?: string;
-  is_sector_leader?: boolean;
+  is_sector_leader: boolean;
   departmentId?: string;
 }
 
@@ -27,7 +27,7 @@ export interface Demand {
   title: string;
   description: string;
   status: StatusType;
-  priority?: 'Baixa' | 'Média' | 'Alta' | 'Crítica'; // Tipagem ajustada para o padrão aceito pelo Card
+  priority?: 'Baixa' | 'Média' | 'Alta' | 'Crítica';
   viewed: boolean;
   asset_tag: string | null;
   deptCode: string;
@@ -60,18 +60,18 @@ interface Department {
   code: string;
 }
 
+interface Specialty {
+  id: string;
+  code: string;
+  name: string;
+}
+
 const COLUMNS = [
   { id: 'A_FAZER', label: 'A Fazer', color: 'gray' },
   { id: 'EM_ANDAMENTO', label: 'Em Andamento', color: 'blue' },
   { id: 'CONCLUIDO', label: 'Concluído', color: 'green' },
   { id: 'INTERROMPIDO', label: 'Interrompido', color: 'red' },
 ];
-
-const QUEUE_MAP: Record<string, string> = {
-  'hardware': '01',
-  'redes': '02',
-  'sistemas': '03'
-};
 
 export function Demands() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -80,6 +80,7 @@ export function Demands() {
   const [loading, setLoading] = useState(true);
   const [allDemands, setAllDemands] = useState<Demand[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]); // 🟢 DINÂMICO
   const [selectedDemand, setSelectedDemand] = useState<Demand | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
   
@@ -101,7 +102,7 @@ export function Demands() {
   }, [roleUpper, loggedUser]);
 
   const unitId = searchParams.get('unit') || (isAdminGeral ? 'geral' : loggedUser?.departmentId || '');
-  const queueId = searchParams.get('queue');
+  const queueId = searchParams.get('queue'); // Recebe o id/code ou string da URL
 
   const fetchDemands = useCallback(async () => {
     try {
@@ -110,7 +111,7 @@ export function Demands() {
       setAllDemands(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       const error = err as AxiosError;
-      if (error.response?.status === 401) navigate('/dashboard');
+      if (error.response?.status === 401) navigate('/login');
     } finally {
       setLoading(false);
     }
@@ -122,11 +123,16 @@ export function Demands() {
     const loadData = async () => {
       await fetchDemands();
       try {
-        const res = await api.get<Department[]>('/departments');
+        // Busca secretarias e especialidades em paralelo
+        const [resDepts, resSpecs] = await Promise.all([
+          api.get<Department[]>('/departments'),
+          api.get<Specialty[]>('/specialties')
+        ]);
+
         if (!isMounted) return;
 
-        const fetchedDepts = res.data || [];
-        setDepartments(fetchedDepts);
+        setDepartments(resDepts.data || []);
+        setSpecialties(resSpecs.data || []);
 
         const urlName = searchParams.get('name');
         if (urlName) {
@@ -135,10 +141,9 @@ export function Demands() {
           setCurrentUnitName('ADMINISTRAÇÃO CENTRAL');
         } else {
           const targetId = !isAdminGeral && loggedUser?.departmentId ? loggedUser.departmentId : unitId;
-          const found = fetchedDepts.find(d => d.id === targetId);
+          const found = resDepts.data.find(d => d.id === targetId);
           if (found) {
             setCurrentUnitName(found.name.toUpperCase());
-            
             setSearchParams(prev => {
               prev.set('name', found.name.toUpperCase());
               prev.set('unit', targetId);
@@ -148,9 +153,8 @@ export function Demands() {
             setCurrentUnitName('VISÃO INTERNA OPERACIONAL');
           }
         }
-
       } catch (err) {
-        console.error("Erro ao buscar secretarias:", err);
+        console.error("Erro ao carregar dados do SAGE:", err);
         if (isMounted) setCurrentUnitName('ERRO OPERACIONAL');
       }
     };
@@ -159,29 +163,33 @@ export function Demands() {
     return () => { isMounted = false; };
   }, [fetchDemands, isAdminGeral, loggedUser, unitId, searchParams, setSearchParams]);
 
+  // 🟢 FILTRO TOTALMENTE DINÂMICO SEM QUEUE_MAP HARDCODED
   const filteredDemands = useMemo(() => {
     let result = allDemands;
 
-    if (isAdminGeral) {
-      if (unitId !== 'geral') {
-        result = result.filter(demand => demand.departmentId === unitId);
+    // 1. Filtro por Unidade (Secretaria)
+    if (unitId && unitId !== 'geral') {
+      result = result.filter(demand => demand.departmentId === unitId);
+    }
+
+    // 2. Filtro por Fila/Especialidade (Hardware, Redes, etc)
+    if (queueId) {
+      const matchedSpec = specialties.find(
+        s => s.name.toLowerCase() === queueId.toLowerCase() || s.code === queueId
+      );
+      if (matchedSpec) {
+        result = result.filter(demand => String(demand.techTypeCode) === String(matchedSpec.code));
       }
     }
 
-    if (queueId && QUEUE_MAP[queueId]) {
-      const targetTypeCode = QUEUE_MAP[queueId];
-      result = result.filter(demand => String(demand.techTypeCode).trim() === String(targetTypeCode).trim());
-    }
-
     return result;
-  }, [allDemands, unitId, queueId, isAdminGeral]);
+  }, [allDemands, unitId, queueId, specialties]);
 
   const onDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
     if (!destination || (destination.droppableId === source.droppableId)) return;
 
     const newStatus = destination.droppableId as StatusType;
-    
     const updatedDemands = allDemands.map(d => d.id === draggableId ? { ...d, status: newStatus } : d);
     setAllDemands(updatedDemands);
 
@@ -289,13 +297,12 @@ export function Demands() {
                                       protocol={demand.protocol}
                                       title={demand.title}
                                       description={demand.description}
-                                      // Usa a prioridade real do banco ou faz fallback amigável
                                       priority={demand.priority || (demand.status === 'INTERROMPIDO' ? 'Crítica' : 'Alta')} 
                                       departmentName={demand.department?.name || departments.find(dep => dep.id === demand.departmentId)?.name || 'Sem Setor'}
                                       techInitials={getTechInitials(demand)}
-                                      technicianName={demand.technician?.name} // INTEGRADO: Nome completo para renderização do Avatar
-                                      viewed={demand.viewed} // INTEGRADO: Controle de leitura do Admin Geral
-                                      isAdminView={isAdminGeral} // INTEGRADO: Ativa a marcação visual amarela de não lido
+                                      technicianName={demand.technician?.name}
+                                      viewed={demand.viewed}
+                                      isAdminView={isAdminGeral}
                                       onClick={() => {
                                         setSelectedDemand(demand);
                                         setModalOpened(true);
@@ -324,7 +331,7 @@ export function Demands() {
         demand={selectedDemand} 
         onUpdate={fetchDemands}
         departments={departments}
-        isAdminView={isAdminGeral} // INTEGRADO: Ativa auditoria dos badges de leitura dentro do Modal
+        isAdminView={isAdminGeral}
       />
     </Box>
   );

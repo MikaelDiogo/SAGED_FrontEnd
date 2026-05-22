@@ -1,305 +1,264 @@
-import { 
-  Container, Paper, Title, TextInput, PasswordInput, 
-  Select, Button, Group, Stack, Text, Table, 
-  Badge, Center, Loader, Box
-} from '@mantine/core';
-import { useForm } from '@mantine/form';
-import { useNavigate } from 'react-router-dom';
 import { useState, useEffect, useMemo } from 'react';
-import { IconUserPlus, IconArrowLeft, IconShieldLock } from '@tabler/icons-react';
+import { Container, Title, Paper, TextInput, Select, Button, Stack, Grid, Table, Text, Badge, Center, Loader, Box } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { api } from '../services/api';
-import { AxiosError } from 'axios';
-import type { User } from '../types';
 
-// Ajustado para mapear a estrutura onde o Técnico é um Usuário com propriedades específicas
-interface TechnicianUser {
-  id: string; // ID do Usuário
+interface Specialty {
+  id: string;
+  code: string;
   name: string;
-  email: string;
-  role: string; // Será 'TECNICO'
-  tech_type_code: string;
-  departmentId: string;
 }
 
 interface Department {
   id: string;
-  name: string;
   code: string;
+  name: string;
 }
 
-const TECH_SPECIALTIES = [
-  { value: '01', label: '01 - HARDWARE / MANUTENÇÃO' },
-  { value: '02', label: '02 - REDES / INTERNET' },
-  { value: '03', label: '03 - SOFTWARE / SISTEMAS' },
-];
+interface TechnicianUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  tech_type_code: string;
+  departmentId?: string;
+  department?: Department;
+}
 
 export function CreateTechnician() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [fetching, setFetching] = useState(true);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<string>('TECNICO');
+  const [isSectorLeader, setIsSectorLeader] = useState(false);
+  const [specialtyCode, setSpecialtyCode] = useState<string | null>(null);
+  const [departmentId, setDepartmentId] = useState<string | null>(null);
+  
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [technicians, setTechnicians] = useState<TechnicianUser[]>([]);
-  const [departments, setDepartments] = useState<{ value: string; label: string }[]>([]);
-  const [myDepartmentName, setMyDepartmentName] = useState('');
 
-  const loggedUser = useMemo<User | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    return storageUser ? JSON.parse(storageUser) : null;
-  }, []);
+  const roleLabels = useMemo<Record<string, string>>(() => ({
+    ADMIN_GERAL: 'Administrador Geral',
+    ADMIN: 'Administrador Geral',
+    ADMIN_SETOR: 'Líder de Unidade',
+    TECNICO_LIDER: 'Técnico Líder',
+    TECNICO: 'Técnico Operacional',
+  }), []);
 
-  const roleUpper = useMemo(() => loggedUser?.role?.trim().toUpperCase(), [loggedUser]);
-  const isGeneralAdmin = roleUpper === 'ADMIN_GERAL';
-  const hasAdminAccess = roleUpper === 'ADMIN' || roleUpper === 'ADMIN_GERAL' || roleUpper === 'ADMIN_SETOR';
-
-  const form = useForm({
-    initialValues: {
-      name: '',
-      email: '',
-      password: '',
-      tech_type_code: '',
-      departmentId: '',
-    },
-    validate: {
-      name: (val) => (val.length < 3 ? 'O nome deve ter ao menos 3 caracteres' : null),
-      email: (val) => (/^\S+@\S+$/.test(val) ? null : 'E-mail inválido'),
-      password: (val) => (val.length < 6 ? 'A senha deve ter ao menos 6 caracteres' : null),
-      tech_type_code: (val) => (!val ? 'Selecione a especialidade do técnico' : null),
-      departmentId: (val) => {
-        if (isGeneralAdmin && !val) return 'Selecione a secretaria do técnico';
-        return null;
-      },
-    },
-  });
+  const fetchTechnicians = async () => {
+    try {
+      const response = await api.get<TechnicianUser[]>('/users');
+      const staff = response.data.filter(u => 
+        ['TECNICO', 'TECNICO_LIDER', 'ADMIN_SETOR'].includes(u.role?.trim().toUpperCase())
+      );
+      setTechnicians(staff);
+    } catch (error) {
+      console.error("Erro ao buscar lista de técnicos:", error);
+    }
+  };
 
   useEffect(() => {
-    if (!hasAdminAccess) {
-      alert('Acesso restrito a perfis administrativos.');
-      navigate('/dashboard');
+    async function loadInitialData() {
+      try {
+        const [specialtiesResponse, departmentsResponse] = await Promise.all([
+          api.get<Specialty[]>('/specialties'),
+          api.get<Department[]>('/departments')
+        ]);
+        setSpecialties(specialtiesResponse.data);
+        setDepartments(departmentsResponse.data);
+        await fetchTechnicians();
+      } catch (error) {
+        notifications.show({
+          title: 'Erro ao carregar dados',
+          message: 'Não foi possível carregar as secretarias ou especialidades técnicas.',
+          color: 'red',
+        });
+      } finally {
+        setLoadingData(false);
+      }
+    }
+    loadInitialData();
+  }, []);
+
+  const handleCreateTechnician = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!specialtyCode) {
+      notifications.show({ message: 'Selecione uma especialidade', color: 'orange' });
+      return;
+    }
+    if (!departmentId) {
+      notifications.show({ message: 'Selecione uma secretaria de alocação', color: 'orange' });
       return;
     }
 
-    let isMounted = true;
-
-    const loadData = async () => {
-      try {
-        setFetching(true);
-
-        // 1. Busca as secretarias do sistema
-        const resDepts = await api.get<Department[]>('/departments');
-        
-        if (isMounted && Array.isArray(resDepts.data)) {
-          setDepartments(
-            resDepts.data.map(dept => ({ 
-              value: dept.id, 
-              label: `${dept.code} - ${dept.name}`.toUpperCase() 
-            }))
-          );
-
-          if (!isGeneralAdmin && loggedUser?.departmentId) {
-            const currentDept = resDepts.data.find(d => d.id === loggedUser.departmentId);
-            if (currentDept) {
-              setMyDepartmentName(`${currentDept.code} - ${currentDept.name}`.toUpperCase());
-            }
-          }
-        }
-
-        // 2. Busca os usuários filtrando pela Role ou rota correspondente do SAGED
-        try {
-          // Se sua API listar todos em /users, podemos filtrar no frontend ou usar query params se o backend aceitar (ex: /users?role=TECNICO)
-          const resUsers = await api.get<TechnicianUser[]>('/users');
-          
-          if (isMounted && Array.isArray(resUsers.data)) {
-            // Filtra para exibir na tabela apenas quem possui o papel de técnico
-            const techsOnly = resUsers.data.filter(user => user.role?.trim().toUpperCase() === 'TECNICO');
-            setTechnicians(techsOnly);
-          }
-        } catch {
-          console.warn('Erro ao listar usuários técnicos. Verifique o endpoint de usuários.');
-          if (isMounted) setTechnicians([]);
-        }
-
-      } catch (err) {
-        console.error('Erro crítico ao carregar dados:', err);
-        alert('Erro ao carregar secretarias. Certifique-se de que a API está rodando localmente.');
-      } finally {
-        if (isMounted) setFetching(false);
-      }
-    };
-
-    loadData();
-    return () => { isMounted = false; };
-  }, [hasAdminAccess, isGeneralAdmin, loggedUser?.departmentId, navigate]);
-
-  const handleRegister = async (values: typeof form.values) => {
-    setLoading(true);
+    setSubmitting(true);
     try {
-      const targetedDepartment = isGeneralAdmin ? values.departmentId : loggedUser?.departmentId;
+      await api.post('/users', {
+        name,
+        email,
+        password,
+        role,
+        is_sector_leader: role === 'TECNICO' ? isSectorLeader : false,
+        tech_type_code: specialtyCode, 
+        departmentId: departmentId,
+      });
 
-      const payload = {
-        name: values.name,
-        email: values.email,
-        password: values.password,
-        role: 'TECNICO',
-        tech_type_code: values.tech_type_code,
-        is_sector_leader: false,
-        departmentId: targetedDepartment
-      };
+      notifications.show({
+        title: 'Usuário Criado',
+        message: `${name} foi registrado no sistema com sucesso.`,
+        color: 'green',
+      });
 
-      await api.post('/users', payload);
-      
-      alert('Técnico cadastrado com sucesso!');
-      form.reset();
-      
-      // Atualiza a tabela após o cadastro bem-sucedido
-      try {
-        const { data } = await api.get<TechnicianUser[]>('/users');
-        if (Array.isArray(data)) {
-          setTechnicians(data.filter(user => user.role?.trim().toUpperCase() === 'TECNICO'));
-        }
-      } catch {
-        setTechnicians([]);
-      }
-    } catch (err) {
-      const error = err as AxiosError<{ error?: string; message?: string }>;
-      alert(error.response?.data?.message || error.response?.data?.error || 'Falha ao cadastrar técnico');
+      setName('');
+      setEmail('');
+      setPassword('');
+      setSpecialtyCode(null);
+      setDepartmentId(null);
+      await fetchTechnicians();
+    } catch (error) {
+      notifications.show({
+        title: 'Erro no cadastro',
+        message: 'Verifique se o e-mail já existe ou os privilégios do seu usuário.',
+        color: 'red',
+      });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const getSpecialtyLabel = (code: string) => {
-    return TECH_SPECIALTIES.find(spec => spec.value === code)?.label || 'NÃO DEFINIDA';
-  };
-
   return (
-    <Container size="lg" pt={40} pb={40}>
-      <Stack gap="xs" mb="xl">
-        <Group gap="sm">
-          <Button 
-            variant="subtle" 
-            color="gray" 
-            leftSection={<IconArrowLeft size={16} />} 
-            onClick={() => navigate('/dashboard')}
-            px={0}
-          >
-            Voltar para o Dashboard
-          </Button>
-        </Group>
-        <Title order={2} fw={900} c="green.9" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <IconShieldLock size={28} /> GESTÃO E CADASTRO DE TÉCNICOS
-        </Title>
-        <Text size="sm" c="dimmed" fw={500}>
-          Área de gerenciamento de equipe exclusiva para perfis administrativos (SAGE RBAC).
-        </Text>
-      </Stack>
+    <Box bg="gray.0" style={{ minHeight: '100vh' }}>
+      <Container size="xl" pt={100} pb="xl">
+        <Stack gap="xs" mb={40}>
+          <Title order={2} c="crateus-green.9" tt="uppercase" fw={900} lts="1px">
+            Gerenciamento de Equipe Técnica
+          </Title>
+          <Text size="sm" c="dimmed" fw={500}>
+            Cadastre novos profissionais e gerencie a listagem operacional do sistema SAGE
+          </Text>
+        </Stack>
 
-      <Box style={{ display: 'flex', gap: '24px', flexDirection: 'row', alignItems: 'flex-start' }}>
-        <Paper withBorder p="xl" radius="md" shadow="sm" style={{ width: '400px', flexShrink: 0 }}>
-          <Title order={4} mb="md" c="gray.8" fw={800}>Novo Técnico</Title>
-          <form onSubmit={form.onSubmit(handleRegister)}>
-            <Stack gap="md">
-              <TextInput
-                label="Nome Completo"
-                placeholder="Ex: Maria Souza"
-                required
-                {...form.getInputProps('name')}
-              />
+        <Grid>
+          {/* Coluna Esquerda: Formulário */}
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <Paper withBorder p="xl" radius="sm" shadow="sm" bg="white">
+              <Title order={4} mb="lg" c="green.9" fw={800}>
+                Novo Cadastro
+              </Title>
 
-              <TextInput
-                label="E-mail Institucional"
-                placeholder="tecnico@prefeitura.gov"
-                required
-                {...form.getInputProps('email')}
-              />
+              <form onSubmit={handleCreateTechnician}>
+                <Stack gap="md">
+                  <TextInput label="Nome Completo" placeholder="Ex: João Silva" required value={name} onChange={(e) => setName(e.currentTarget.value)} />
+                  <TextInput label="E-mail Institucional" placeholder="tecnico@crateus.br" type="email" required value={email} onChange={(e) => setEmail(e.currentTarget.value)} />
+                  <TextInput label="Senha Inicial" placeholder="Mínimo 6 caracteres" type="password" required value={password} onChange={(e) => setPassword(e.currentTarget.value)} />
+                  
+                  <Select
+                    label="Papel / Role"
+                    data={[
+                      { value: 'TECNICO', label: 'Técnico Operacional' },
+                      { value: 'TECNICO_LIDER', label: 'Técnico Líder' },
+                      { value: 'ADMIN_SETOR', label: 'Líder de Unidade (Gestor)' },
+                    ]}
+                    value={role}
+                    onChange={(val) => setRole(val || 'TECNICO')}
+                    required
+                  />
 
-              <PasswordInput
-                label="Senha de Acesso"
-                placeholder="Mínimo 6 caracteres"
-                required
-                {...form.getInputProps('password')}
-              />
+                  {role === 'TECNICO' && (
+                    <Select
+                      label="Promover a Líder de Setor?"
+                      data={[{ value: 'false', label: 'Não' }, { value: 'true', label: 'Sim' }]}
+                      value={isSectorLeader.toString()}
+                      onChange={(val) => setIsSectorLeader(val === 'true')}
+                    />
+                  )}
 
-              <Select
-                label="Especialidade TEC (Protocolo)"
-                placeholder="Selecione a especialidade"
-                data={TECH_SPECIALTIES}
-                required
-                {...form.getInputProps('tech_type_code')}
-              />
+                  <Select
+                    label="Secretaria de Lotação"
+                    placeholder="Selecione o setor"
+                    data={departments.map((d) => ({ value: d.id, label: `${d.code} - ${d.name}` }))}
+                    required
+                    value={departmentId}
+                    onChange={setDepartmentId}
+                    searchable
+                  />
 
-              {isGeneralAdmin ? (
-                <Select
-                  label="Secretaria / Departamento"
-                  placeholder="Selecione o destino do técnico"
-                  data={departments}
-                  required
-                  searchable
-                  clearable
-                  {...form.getInputProps('departmentId')}
-                />
+                  <Select
+                    label="Especialidade Principal"
+                    placeholder="Selecione a área"
+                    data={specialties.map((spec) => ({ value: spec.code, label: spec.name }))}
+                    required
+                    value={specialtyCode}
+                    onChange={setSpecialtyCode}
+                  />
+
+                  <Button type="submit" color="green.8" loading={submitting} mt="md" fullWidth fw={700}>
+                    Registrar na Equipe
+                  </Button>
+                </Stack>
+              </form>
+            </Paper>
+          </Grid.Col>
+
+          {/* Coluna Direita: Tabela */}
+          <Grid.Col span={{ base: 12, md: 8 }}>
+            <Paper withBorder p="xl" radius="sm" shadow="sm" bg="white">
+              <Title order={4} mb="lg" c="green.9" fw={800}>
+                Profissionais Ativos
+              </Title>
+              
+              {loadingData ? (
+                <Center h={200}><Loader color="green.8" /></Center>
               ) : (
-                <TextInput
-                  label="Secretaria / Departamento"
-                  value={myDepartmentName || 'Carregando secretaria...'}
-                  disabled
-                  readOnly
-                  description="Técnicos criados por você farão parte da sua secretaria automaticamente."
-                />
+                <Table verticalSpacing="sm" highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Profissional</Table.Th>
+                      <Table.Th>Secretaria</Table.Th>
+                      <Table.Th>Especialidade</Table.Th>
+                      <Table.Th>Nível</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {technicians.length === 0 ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={4}>
+                          <Text c="dimmed" ta="center" size="sm" py="xl">Nenhum técnico cadastrado para esta visualização.</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : (
+                      technicians.map((tech) => (
+                        <Table.Tr key={tech.id}>
+                          <Table.Td>
+                            <Stack gap={0}>
+                              <Text size="sm" fw={700}>{tech.name}</Text>
+                              <Text size="xs" c="dimmed">{tech.email}</Text>
+                            </Stack>
+                          </Table.Td>
+                          <Table.Td><Text size="xs" fw={600}>{departments.find(d => d.id === tech.departmentId)?.name || 'Não Vinculado'}</Text></Table.Td>
+                          <Table.Td>
+                            <Badge color="blue" variant="light" size="xs" radius="xs">
+                              {specialties.find(s => s.code === tech.tech_type_code)?.name || 'Geral'}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge color="green.8" variant="outline" size="xs">
+                              {roleLabels[tech.role] || tech.role}
+                            </Badge>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))
+                    )}
+                  </Table.Tbody>
+                </Table>
               )}
-
-              <Button 
-                type="submit" 
-                color="green.8" 
-                fullWidth 
-                mt="sm"
-                loading={loading}
-                leftSection={<IconUserPlus size={18} />}
-              >
-                Cadastrar Membro
-              </Button>
-            </Stack>
-          </form>
-        </Paper>
-
-        <Paper withBorder p="xl" radius="md" shadow="sm" style={{ flex: 1, minHeight: '380px' }}>
-          <Title order={4} mb="md" c="gray.8" fw={800}>Equipe Técnica Cadastrada</Title>
-          
-          {fetching ? (
-            <Center style={{ height: '200px' }}><Loader color="green.8" type="dots" /></Center>
-          ) : (
-            <Table highlightOnHover verticalSpacing="sm">
-              <Table.Thead bg="gray.0">
-                <Table.Tr>
-                  <Table.Th><Text fw={800} size="xs">NOME</Text></Table.Th>
-                  <Table.Th><Text fw={800} size="xs">E-MAIL</Text></Table.Th>
-                  <Table.Th><Text fw={800} size="xs">ESPECIALIDADE</Text></Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {technicians.map((tech) => (
-                  <Table.Tr key={tech.id}>
-                    <Table.Td style={{ fontWeight: 600, color: '#2b2b2b' }}>{tech.name.toUpperCase()}</Table.Td>
-                    <Table.Td><Text c="dimmed" size="sm">{tech.email}</Text></Table.Td>
-                    <Table.Td>
-                      <Badge variant="light" color="green.8" size="sm" radius="sm">
-                        {getSpecialtyLabel(tech.tech_type_code)}
-                      </Badge>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-                {technicians.length === 0 && (
-                  <Table.Tr>
-                    <Table.Td colSpan={3} style={{ textAlign: 'center' }}>
-                      <Text c="dimmed" py="xl" size="sm">Nenhum técnico listado ou cadastrado.</Text>
-                    </Table.Td>
-                  </Table.Tr>
-                )}
-              </Table.Tbody>
-            </Table>
-          )}
-        </Paper>
-      </Box>
-    </Container>
+            </Paper>
+          </Grid.Col>
+        </Grid>
+      </Container>
+    </Box>
   );
 }
-
-//

@@ -2,28 +2,16 @@ import axios from 'axios';
 
 export const api = axios.create({
   baseURL: 'http://localhost:3333',
-  withCredentials: true,
+  withCredentials: true, // 👈 Isso garante que o navegador envie o Cookie HttpOnly automaticamente!
 });
 
-api.interceptors.request.use((config) => {
-  const userJson = localStorage.getItem('@SAGE:user');
-
-  if (userJson) {
-    try {
-      const user = JSON.parse(userJson);
-      if (user.id) config.headers['user-id'] = String(user.id);
-      if (user.role) config.headers['user-role'] = String(user.role);
-    } catch (e) {
-      console.error("Erro ao injetar contexto nos headers", e);
-    }
-  }
-
-  return config;
-}, (error) => Promise.reject(error));
+// O interceptor de request foi removido para evitar o envio manual de headers de privilégio (RBAC Bypass).
+// Agora o backend identifica o usuário e seu papel estritamente através do Cookie HttpOnly 'token'.
 
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Se o backend responder 401, significa que o Cookie expirou ou é inválido
     if (error.response?.status === 401) {
       localStorage.removeItem('@SAGE:user');
       window.location.href = '/login'; 

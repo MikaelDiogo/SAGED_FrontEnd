@@ -2,8 +2,10 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'TECNICO' | 'SOLICITANTE' | string;
-  departmentId?: string; // Sincronizado com os interceptors e localStorage
+  role: 'ADMIN_GERAL' | 'ADMIN_SETOR' | 'TECNICO_LIDER' | 'TECNICO';
+  is_sector_leader: boolean;
+  departmentId?: string;
+  tech_type_code?: string; 
 }
 
 export interface SignInCredentials {
@@ -21,7 +23,7 @@ export interface Demand {
   id: string;
   title: string;
   description: string;
-  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED' | string; // Adaptado para nomenclaturas padrão de Swagger
+  status: 'A_FAZER' | 'EM_ANDAMENTO' | 'CONCLUIDO' | 'INTERROMPIDO' | 'CANCELADO';
   protocol: string;
   asset_tag?: string;
   techTypeCode: string;

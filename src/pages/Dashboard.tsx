@@ -20,7 +20,7 @@ import type { User as BaseUser } from '../types';
 interface ExtendedUser extends BaseUser {
   role: 'ADMIN_GERAL' | 'ADMIN_SETOR' | 'TECNICO_LIDER' | 'TECNICO';
   tech_type_code?: string;
-  is_sector_leader?: boolean;
+  is_sector_leader: boolean;
   departmentId?: string;
 }
 
@@ -42,7 +42,8 @@ export function Dashboard() {
   const roleUpper = useMemo(() => loggedUser?.role?.trim().toUpperCase(), [loggedUser]);
   
   // Mapeamento das permissões de acordo com as especificações do Swagger
-  const isAdminGeral = useMemo(() => roleUpper === 'ADMIN_GERAL', [roleUpper]);
+  // UNIFICAÇÃO: Aceita ADMIN ou ADMIN_GERAL como gestor global
+  const isAdminGeral = useMemo(() => roleUpper === 'ADMIN_GERAL' || roleUpper === 'ADMIN', [roleUpper]);
   const isTechnician = useMemo(() => roleUpper === 'TECNICO', [roleUpper]);
   const hasSectorView = useMemo(() => {
     return roleUpper === 'ADMIN_SETOR' || roleUpper === 'TECNICO_LIDER' || loggedUser?.is_sector_leader === true;
@@ -64,21 +65,27 @@ export function Dashboard() {
     loadDemands();
   }, []);
 
-  // 🟢 ESCOPO DO DASHBOARD: Sincronizado com o retorno real da API
+  // ESCOPO DO DASHBOARD: Sincronizado com o retorno real da API
   const demands = useMemo(() => {
     let result = allDemands;
 
-    // Se for ADMIN_GERAL e houver unidade selecionada na URL, filtramos a nível de gerência visual
-    if (isAdminGeral) {
-      if (unitId && unitId !== 'geral') {
-        result = result.filter(demand => String(demand.departmentId) === String(unitId));
-      }
+    // Se o usuário selecionou uma unidade específica na barra de busca (Admin Geral)
+    if (unitId && unitId !== 'geral') {
+      result = result.filter(demand => String(demand.departmentId) === String(unitId));
     }
-    // Nota: Para ADMIN_SETOR, TECNICO_LIDER e TECNICO (com ou sem liderança), 
-    // a API /demands já devolve as demandas pré-filtradas do banco. Não aplicamos filtros locais restritivos.
 
+    // Nota: O backend já retorna apenas as demandas permitidas para técnicos 
+    // e líderes de setor via RBAC automático no endpoint /demands.
     return result;
-  }, [allDemands, unitId, isAdminGeral]);
+  }, [allDemands, unitId]);
+
+  // Resolve o nome da unidade para exibição no Badge
+  const displayUnitName = useMemo(() => {
+    if (unitId === 'geral' || !unitId) return 'ADMINISTRAÇÃO MUNICIPAL';
+    if (unitName && unitName !== 'Secretaria Selecionada') return unitName;
+    // Se tiver ID mas não tiver nome (vindo de um link direto), tenta achar no primeiro item da lista
+    return demands[0]?.department?.name || 'UNIDADE FILTRADA';
+  }, [unitId, unitName, demands]);
 
   // Indicadores calculados dinamicamente com base nas demandas acessíveis
   const metrics = useMemo(() => {
@@ -88,7 +95,6 @@ export function Dashboard() {
     const completed = demands.filter(d => d.status === 'CONCLUIDO').length;
     const interrupted = demands.filter(d => d.status === 'INTERROMPIDO').length;
     
-    // Demandas retidas/interrompidas necessitam de atenção crítica na infraestrutura
     const critical = interrupted; 
 
     return {
@@ -129,7 +135,7 @@ export function Dashboard() {
   };
 
   return (
-    <Container size="xl" pt={80} pb={80}>
+    <Container size="xl" pt={100} pb={80}>
       <Stack gap="lg">
         
         {isAdminGeral && (
@@ -157,7 +163,7 @@ export function Dashboard() {
                 </Badge>
               ) : hasSectorView ? (
                 <Badge color="green.8" variant="filled" radius="sm">
-                  FILA DA SECRETARIA: {unitName.toUpperCase()}
+                  FILA DA SECRETARIA: {displayUnitName.toUpperCase()}
                 </Badge>
               ) : (
                 <Badge color="green.9" variant="filled" radius="sm">
@@ -259,7 +265,15 @@ export function Dashboard() {
                         </Table.Thead>
                         <Table.Tbody>
                           {demands.slice(0, 4).map((demand) => (
-                            <Table.Tr key={demand.id} onClick={() => navigate('/quadro')} style={{ cursor: 'pointer' }}>
+                            <Table.Tr 
+                              key={demand.id} 
+                              onClick={() => {
+                                const deptId = demand.departmentId;
+                                const deptName = demand.department?.name || 'Secretaria';
+                                navigate(`/demandas?unit=${deptId}&name=${encodeURIComponent(deptName)}`);
+                              }} 
+                              style={{ cursor: 'pointer' }}
+                            >
                               <Table.Td><Text size="xs" fw={800} c="green.9">#{demand.protocol}</Text></Table.Td>
                               <Table.Td>
                                 <Stack gap={2}>

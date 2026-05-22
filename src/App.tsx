@@ -12,6 +12,10 @@ const theme = createTheme({
       '#64b156', '#59ad4a', '#4a983d', '#3d8734', '#1D720A'
     ],
   },
+  fontFamily: 'Inter, sans-serif',
+  headings: {
+    fontFamily: 'Inter, sans-serif',
+  },
   primaryColor: 'crateus-green',
   primaryShade: 9,
 });

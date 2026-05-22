@@ -2,37 +2,32 @@ import {
   Container, 
   Title, 
   Text, 
-  SimpleGrid, 
+  Flex, 
   Stack, 
   Paper, 
   ThemeIcon, 
   Box 
 } from '@mantine/core';
-import { IconNetwork, IconDeviceDesktop, IconCode } from '@tabler/icons-react';
+import { IconNetwork, IconDeviceDesktop} from '@tabler/icons-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useMemo } from 'react';
+import type { User } from '../types';
 
 // Definição dos dados das filas (Cargos)
 const cargosMock = [
   { 
-    id: 'redes', 
-    label: 'Técnico de Redes', 
-    icon: IconNetwork, 
-    color: 'blue', 
-    desc: 'Infraestrutura, roteadores, switches e fibra óptica' 
-  },
-  { 
-    id: 'hardware', 
+    id: '01', 
     label: 'Suporte Hardware', 
     icon: IconDeviceDesktop, 
     color: 'orange', 
     desc: 'Manutenção de computadores, impressoras e periféricos' 
   },
   { 
-    id: 'sistemas', 
-    label: 'Desenvolvimento', 
-    icon: IconCode, 
-    color: 'grape', 
-    desc: 'Sistema SAGED, Portais Oficiais e Banco de Dados' 
+    id: '02', 
+    label: 'Técnico de Redes', 
+    icon: IconNetwork, 
+    color: 'blue', 
+    desc: 'Infraestrutura, roteadores, switches e fibra óptica' 
   },
 ];
 
@@ -40,11 +35,43 @@ export function SelectQueue() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
-  // Captura a unidade selecionada previamente na URL
-  const unitId = searchParams.get('unit');
-  const unitName = searchParams.get('name') || 'Unidade não identificada';
+  const loggedUser = useMemo<User | null>(() => {
+    const storageUser = localStorage.getItem('@SAGE:user');
+    return storageUser ? JSON.parse(storageUser) : null;
+  }, []);
+
+  const isAdminGeral = useMemo(() => {
+    const role = loggedUser?.role?.trim().toUpperCase();
+    return role === 'ADMIN_GERAL' || role === 'ADMIN';
+  }, [loggedUser]);
+
+  const isLiderSetor = useMemo(() => {
+    const role = loggedUser?.role?.trim().toUpperCase();
+    return role === 'ADMIN_SETOR' || 
+           role === 'TECNICO_LIDER' || 
+           (role === 'TECNICO' && loggedUser?.is_sector_leader === true);
+  }, [loggedUser]);
+
+  // Captura a unidade selecionada na URL ou utiliza o contexto do usuário (RBAC) para garantir o filtro correto
+  const unitId = searchParams.get('unit') || (isAdminGeral ? 'geral' : loggedUser?.departmentId || '');
+  const unitName = searchParams.get('name') || 
+    (unitId === 'geral' ? 'ADMINISTRAÇÃO MUNICIPAL' : 
+    (unitId === loggedUser?.departmentId ? 'SUA UNIDADE VINCULADA' : 'UNIDADE OPERACIONAL'));
 
   const handleSelect = (cargoId: string) => {
+    // Se o usuário for um técnico e tentar selecionar uma especialidade diferente da sua,
+    // ou se não for admin e tentar selecionar algo que não é da sua alçada,
+    // podemos adicionar uma notificação ou simplesmente não permitir a navegação.
+    // Por enquanto, vamos apenas garantir que a opção esteja visível para ele.
+    if (loggedUser?.role?.trim().toUpperCase() === 'TECNICO' && loggedUser?.tech_type_code && cargoId !== loggedUser.tech_type_code) {
+      // Opcional: Adicionar uma notificação aqui, se desejar
+      // notifications.show({
+      //   title: 'Acesso Restrito',
+      //   message: 'Você só pode acessar a fila da sua especialidade.',
+      //   color: 'red',
+      // });
+      return; // Impede a navegação se não for a especialidade do técnico
+    }
     // Monta a Query String mantendo a unidade e adicionando a fila (queue)
     const params = new URLSearchParams();
     if (unitId) params.set('unit', unitId);
@@ -54,6 +81,15 @@ export function SelectQueue() {
     // Navega para o quadro de demandas com os filtros aplicados
     navigate(`/demandas?${params.toString()}`);
   };
+
+  // Filtra os cargos com base na especialidade do usuário logado
+  const filteredCargos = useMemo(() => {
+    if (isAdminGeral || isLiderSetor) { // ADMIN_GERAL e Líderes de Setor veem todas as opções
+      return cargosMock;
+    }
+    // Técnicos comuns veem apenas sua própria especialidade
+    return cargosMock.filter(cargo => cargo.id === loggedUser?.tech_type_code);
+  }, [isAdminGeral, isLiderSetor, loggedUser]);
 
   return (
     <Container size="lg" pt={100} pb="xl">
@@ -71,9 +107,14 @@ export function SelectQueue() {
           </Text>
         </Box>
 
-        {/* Grid de Opções */}
-        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="lg">
-          {cargosMock.map((cargo) => (
+        {/* Flex de Opções */}
+        <Flex 
+          gap="lg" 
+          justify="center" 
+          wrap="wrap"
+          direction={{ base: 'column', sm: 'row' }}
+        >
+          {filteredCargos.map((cargo) => (
             <Paper 
               key={cargo.id}
               withBorder 
@@ -89,7 +130,9 @@ export function SelectQueue() {
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: 'white'
+                backgroundColor: 'white',
+                width: '100%',
+                maxWidth: '350px',
               }}
               // Efeito de hover inline para garantir funcionamento imediato
               onMouseEnter={(e) => {
@@ -117,7 +160,7 @@ export function SelectQueue() {
               </Stack>
             </Paper>
           ))}
-        </SimpleGrid>
+        </Flex>
 
         {/* Botão de Voltar (Opcional) */}
         <Box style={{ textAlign: 'center' }} mt="md">

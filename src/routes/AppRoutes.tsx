@@ -10,6 +10,7 @@ import { Login } from '../pages/Login';
 import { Reports } from '../pages/Reports';
 import { CreateDemand } from '../pages/CreateDemand';
 import { CreateTechnician } from '../pages/CreateTechnician';
+import { ProtectedRoute } from '../components/ProtectedRoute';
 import { Center, Loader } from '@mantine/core';
 
 function InitialRedirect() {
@@ -40,15 +41,22 @@ export function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Rota Pública de Autenticação */}
         <Route 
           path="/login" 
           element={isAuthenticated ? <InitialRedirect /> : <Login />} 
         />
 
+        {/* Grupo de Rotas Privadas e Protegidas via RBAC */}
         <Route 
           path="/" 
-          element={isAuthenticated ? <DefaultLayout /> : <Navigate to="/login" replace />}
+          element={
+            <ProtectedRoute>
+              <DefaultLayout />
+            </ProtectedRoute>
+          }
         >
+          {/* Redirecionamento Inicial inteligente com base no Perfil */}
           <Route index element={<InitialRedirect />} />
           
           <Route path="selecionar-unidade" element={<SelectUnit />} />
@@ -57,11 +65,10 @@ export function AppRoutes() {
           <Route path="relatorios" element={<Reports />} />
           <Route path="demandas" element={<Demands />} />
           <Route path="novo-chamado" element={<CreateDemand />} />
-          {/* Nova Rota Administrativa adicionada */}
           <Route path="gerenciar-tecnicos" element={<CreateTechnician />} />
         </Route>
 
-        {/* 🟢 CORREÇÃO AQUI: Aspas fechadas em path="*" */}
+        {/* Fallback de rotas inexistentes redirecionando para a Autenticação */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>

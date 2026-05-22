@@ -30,8 +30,8 @@ export function Header({ opened, toggle }: HeaderProps) {
   // 2. Monta os links do menu dinamicamente com base nas permissões
   const menuItems = useMemo(() => {
     const baseLinks = [
-      { link: '/dashboard', label: 'Painel de Visualização' },
-      { link: '/demandas', label: 'Quadro de Demandas' }, // 🟢 CORRIGIDO: Ajustado de /selecionar-fila para /demandas
+      { link: '/selecionar-unidade', label: 'Painel de Visualização' },
+      { link: '/selecionar-fila', label: 'Quadro de Demandas' },
       { link: '/novo-chamado', label: 'Criação de Demanda' },
       { link: '/relatorios', label: 'Relatórios' },
     ];
@@ -106,7 +106,7 @@ export function Header({ opened, toggle }: HeaderProps) {
               w="auto" 
               fit="contain" 
               style={{ cursor: 'pointer' }}
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate('/selecionar-unidade')}
             />
           </Group>
         </Container>
