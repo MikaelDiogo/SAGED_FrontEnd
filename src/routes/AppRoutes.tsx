@@ -64,8 +64,13 @@ export function AppRoutes() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="relatorios" element={<Reports />} />
           <Route path="demandas" element={<Demands />} />
-          <Route path="novo-chamado" element={<CreateDemand />} />
-          <Route path="gerenciar-tecnicos" element={<CreateTechnician />} />
+          <Route path="novo-chamado" element={<CreateDemand />} /> 
+          <Route 
+            path="gerenciar-tecnicos" 
+            element={
+              <ProtectedRoute allowedRoles={['ADMIN_GERAL', 'ADMIN_SETOR']}><CreateTechnician /></ProtectedRoute>
+            } 
+          />
         </Route>
 
         {/* Fallback de rotas inexistentes redirecionando para a Autenticação */}
