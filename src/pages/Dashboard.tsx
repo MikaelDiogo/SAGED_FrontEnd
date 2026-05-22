@@ -265,6 +265,7 @@ export function Dashboard() {
                         </Table.Thead>
                         <Table.Tbody>
                           {demands.slice(0, 4).map((demand) => (
+                              //Entrada clicável para detalhes da demanda, passando o ID da unidade e nome via query params para o filtro na página de demandas
                             <Table.Tr 
                               key={demand.id} 
                               onClick={() => {
