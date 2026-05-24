@@ -33,7 +33,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setUser(userData);
   }
 
-  const signOut = () => {
+  const signOut = async () => {
+    try {
+      await api.delete('/sessions');
+    } catch {
+      // ignora erro de rede, prossegue com limpeza local
+    }
     localStorage.removeItem('@SAGE:user');
     setUser(null);
   };
