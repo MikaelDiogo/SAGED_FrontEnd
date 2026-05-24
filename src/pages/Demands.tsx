@@ -2,6 +2,7 @@ import {
   Title, Text, Group, Paper, Badge, Box, 
   ScrollArea, Select, UnstyledButton, Stack, Button
 } from '@mantine/core'; 
+import { notifications } from '@mantine/notifications';
 import { IconArrowLeft, IconPlus } from '@tabler/icons-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useMemo, useCallback, useContext } from 'react';
@@ -162,7 +163,7 @@ export function Demands() {
     return () => { isMounted = false; };
   }, [fetchDemands, isAdminGeral, loggedUser, unitId, searchParams, setSearchParams]);
 
-  // 🟢 FILTRO TOTALMENTE DINÂMICO SEM QUEUE_MAP HARDCODED
+
   const filteredDemands = useMemo(() => {
     let result = allDemands;
 
@@ -187,6 +188,20 @@ export function Demands() {
   const onDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
     if (!destination || (destination.droppableId === source.droppableId)) return;
+
+    const demand = allDemands.find(d => d.id === draggableId);
+    const canMove =
+      isAdminGeral ||
+      isLiderSetor ||
+      demand?.current_technician_id === loggedUser?.id;
+
+    if (!canMove) {
+      notifications.show({
+        message: 'Sem permissão para mover este chamado.',
+        color: 'orange',
+      });
+      return;
+    }
 
     const newStatus = destination.droppableId as StatusType;
     const updatedDemands = allDemands.map(d => d.id === draggableId ? { ...d, status: newStatus } : d);
