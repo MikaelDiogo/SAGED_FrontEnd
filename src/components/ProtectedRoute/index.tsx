@@ -13,7 +13,11 @@ export function ProtectedRoute({
   allowSectorLeader = false, 
   children 
 }: ProtectedRouteProps) {
-  const { user, isAuthenticated } = useContext(AuthContext);
+  const { user, isAuthenticated, loading } = useContext(AuthContext);
+
+  if (loading) {
+    return null; // Poderia ser um componente de Loading/Spinner
+  }
 
   // 1. Barreira de Autenticação Global: Se não houver token ou usuário, vai para o Login
   if (!isAuthenticated || !user) {

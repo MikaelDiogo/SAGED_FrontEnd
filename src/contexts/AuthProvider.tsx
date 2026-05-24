@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import type { User, SignInCredentials } from '../types';
 import { api } from '../services/api';
 import { AuthContext } from './AuthContext';
@@ -8,20 +8,23 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  // Inicialização síncrona e limpa direto no estado (padrão recomendado pela equipe do React)
-  const [user, setUser] = useState<User | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    if (storageUser) {
-      try {
-        return JSON.parse(storageUser) as User;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const [loading] = useState(false);
+  useEffect(() => {
+    api.get('/sessions/me')
+      .then(res => {
+        const userData = res.data.user;
+        setUser(userData);
+        localStorage.setItem('@SAGE:user', JSON.stringify(userData));
+      })
+      .catch(() => {
+        setUser(null);
+        localStorage.removeItem('@SAGE:user');
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
   const isAuthenticated = !!user;
 
   async function signIn({ email, password }: SignInCredentials) {
