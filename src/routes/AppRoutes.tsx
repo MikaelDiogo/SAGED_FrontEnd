@@ -61,7 +61,14 @@ export function AppRoutes() {
           <Route path="selecionar-unidade" element={<SelectUnit />} />
           <Route path="selecionar-fila" element={<SelectQueue />} />
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="relatorios" element={<Reports />} />
+          <Route 
+            path="relatorios" 
+            element={
+              <ProtectedRoute allowedRoles={['ADMIN_GERAL', 'ADMIN_SETOR', 'TECNICO_LIDER']}>
+                <Reports />
+              </ProtectedRoute>
+            } 
+          />
           <Route path="demandas" element={<Demands />} />
           <Route path="novo-chamado" element={<CreateDemand />} /> 
           <Route 

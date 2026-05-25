@@ -18,6 +18,14 @@ export function DefaultLayout() {
     return role === 'ADMIN' || role === 'ADMIN_GERAL'; // Já estava consistente, mas mantemos atenção aqui
   }, []);
 
+  const isReportAllowed = useMemo(() => {
+    const storageUser = localStorage.getItem('@SAGE:user');
+    if (!storageUser) return false;
+    const user = JSON.parse(storageUser) as User;
+    const role = user?.role?.trim().toUpperCase();
+    return role === 'ADMIN_GERAL' || role === 'ADMIN_SETOR' || role === 'TECNICO_LIDER';
+  }, []);
+
   return (
     <AppShell
       header={{ height: { base: 120, sm: 170 } }}
@@ -52,12 +60,14 @@ export function DefaultLayout() {
           fw={600}
           onClick={() => { navigate('/novo-chamado'); close(); }} 
         />
-        <NavLink 
-          label="Relatórios" 
-          c="white" 
-          fw={600}
-          onClick={() => { navigate('/relatorios'); close(); }} 
-        />
+        {isReportAllowed && (
+          <NavLink 
+            label="Relatórios" 
+            c="white" 
+            fw={600}
+            onClick={() => { navigate('/relatorios'); close(); }} 
+          />
+        )}
         
         {/* Renderização Condicional Exclusiva para os Perfis Admin */}
         {isAdmin && (

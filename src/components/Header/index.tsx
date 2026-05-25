@@ -24,14 +24,22 @@ export function Header({ opened, toggle }: HeaderProps) {
     return role === 'ADMIN_GERAL';
   }, [loggedUser]);
 
+  const isReportAllowed = useMemo(() => {
+    const role = loggedUser?.role?.trim().toUpperCase();
+    return role === 'ADMIN_GERAL' || role === 'ADMIN_SETOR' || role === 'TECNICO_LIDER';
+  }, [loggedUser]);
+
   // 2. Monta os links do menu dinamicamente com base nas permissões
   const menuItems = useMemo(() => {
     const baseLinks = [
       { link: '/selecionar-unidade', label: 'Painel de Visualização' },
       { link: '/selecionar-fila', label: 'Quadro de Demandas' },
       { link: '/novo-chamado', label: 'Criação de Demanda' },
-      { link: '/relatorios', label: 'Relatórios' },
     ];
+
+    if (isReportAllowed) {
+      baseLinks.push({ link: '/relatorios', label: 'Relatórios' });
+    }
 
     // Se for admin, injeta o link de gerenciamento no menu desktop
     if (isAdmin) {
@@ -39,7 +47,7 @@ export function Header({ opened, toggle }: HeaderProps) {
     }
 
     return baseLinks;
-  }, [isAdmin]);
+  }, [isReportAllowed, isAdmin]);
 
   // Função para limpar a sessão e deslogar do SAGE
   const handleLogout = () => {
