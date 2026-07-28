@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useContext } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { Container, Title, Paper, TextInput, Textarea, Select, Button, Stack } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api } from '../services/api';
@@ -10,19 +10,10 @@ interface Specialty {
   name: string;
 }
 
-interface Department {
+interface OrgUnit {
   id: string;
   code: string;
   name: string;
-}
-
-// Interface estendida baseada no UserPublic do Swagger
-interface LoggedUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'ADMIN_GERAL' | 'ADMIN_SETOR' | 'TECNICO_LIDER' | 'TECNICO';
-  departmentId: string | null;
 }
 
 export function CreateDemand() {
@@ -30,82 +21,68 @@ export function CreateDemand() {
   const [description, setDescription] = useState('');
   const [assetTag, setAssetTag] = useState('');
   const [specialtyCode, setSpecialtyCode] = useState<string | null>(null);
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
+  const [departmentId, setDepartmentId] = useState<string | null>(null);
 
   const [specialties, setSpecialties] = useState<Specialty[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Recupera e tipa o usuário logado do ecossistema SAGE
   const { user } = useContext(AuthContext);
-  const loggedUser = user as unknown as LoggedUser | null;
-
-  const isAdminGeral = useMemo(() => {
-    return loggedUser?.role?.trim().toUpperCase() === 'ADMIN_GERAL';
-  }, [loggedUser]);
+  const isAdminGeral = user?.role === 'SAGED_ADMIN_GERAL';
 
   useEffect(() => {
-    async function loadFormRequirements() {
+    async function loadFormData() {
       try {
-        const [specialtiesRes, departmentsRes] = await Promise.all([
+        const requests = [
           api.get<Specialty[]>('/specialties'),
-          isAdminGeral ? api.get<Department[]>('/departments') : Promise.resolve({ data: [] })
-        ]);
+          ...(isAdminGeral ? [api.get<OrgUnit[]>('/org-units')] : []),
+        ] as const;
 
+        const [specialtiesRes, orgUnitsRes] = await Promise.all(requests);
         setSpecialties(specialtiesRes.data);
-        if (isAdminGeral) {
-          setDepartments(departmentsRes.data);
-        }
-      } catch (error) {
+        if (isAdminGeral && orgUnitsRes) setOrgUnits(orgUnitsRes.data);
+      } catch {
         notifications.show({
-          title: 'Erro ao carregar formulário',
-          message: 'Não foi possível buscar as parametrizações do SAGE.',
+          title: 'Erro ao carregar',
+          message: 'Não foi possível carregar os dados do formulário.',
           color: 'red',
         });
       } finally {
         setLoadingData(false);
       }
     }
-    loadFormRequirements();
+    loadFormData();
   }, [isAdminGeral]);
 
   const handleCreateDemand = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!loggedUser?.id) {
-      notifications.show({ message: 'Sessão expirada. Faça login novamente.', color: 'red' });
-      return;
-    }
-
     if (!specialtyCode) {
-      notifications.show({ message: 'Selecione a categoria do problema', color: 'orange' });
+      notifications.show({ message: 'Selecione a categoria de especialidade.', color: 'orange' });
       return;
     }
 
-    // Define qual departmentId enviar baseado no papel (RBAC)
-    let targetDepartmentId = isAdminGeral ? selectedDepartmentId : loggedUser.departmentId;
-
-    if (!targetDepartmentId) {
-      notifications.show({ 
-        message: isAdminGeral 
-          ? 'Selecione a secretaria vinculada ao chamado' 
-          : 'Seu usuário não possui uma secretaria vinculada.', 
-        color: 'orange' 
-      });
+    if (isAdminGeral && !departmentId) {
+      notifications.show({ message: 'Selecione a secretaria para este chamado.', color: 'orange' });
       return;
     }
 
     setSubmitting(true);
+    const correlationId = crypto.randomUUID();
+
     try {
-      // Payload montado exatamente igual ao CreateDemandRequest do Swagger
-      await api.post('/demands', {
-        title,
-        description,
-        departmentId: targetDepartmentId,   // Obrigatório no Swagger (UUID)
-        techTypeCode: specialtyCode,       // Obrigatório no Swagger
-        asset_tag: assetTag || undefined,  // Opcional
-      });
+      await api.post(
+        '/demands',
+        {
+          title,
+          description,
+          specialtyCode,
+          ...(departmentId ? { departmentId } : {}),
+          assetTag: assetTag.trim() || undefined,
+        },
+        { headers: { 'X-Correlation-Id': correlationId } }
+      );
 
       notifications.show({
         title: 'Chamado Aberto!',
@@ -113,29 +90,24 @@ export function CreateDemand() {
         color: 'green',
       });
 
-      // Limpa os estados do formulário
       setTitle('');
       setDescription('');
       setAssetTag('');
       setSpecialtyCode(null);
-      setSelectedDepartmentId(null);
+      setDepartmentId(null);
     } catch (error) {
-      console.error("Erro na API /demands:", error);
-      notifications.show({
-        title: 'Erro ao abrir chamado',
-        message: 'Houve um problema técnico ao processar sua requisição.',
-        color: 'red',
-      });
+      const message = error instanceof Error ? error.message : 'Erro ao abrir chamado.';
+      notifications.show({ title: 'Erro', message, color: 'red' });
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Container size="sm" pt={100} pb="xl">
+    <Container size="sm" py="xl">
       <Paper withBorder p="xl" radius="sm" shadow="sm">
         <Title order={3} mb="xl" c="green.9" tt="uppercase" fw={800}>
-          Abrir Nova Demanda / Chamado
+          Abrir Nova Demanda
         </Title>
 
         <form onSubmit={handleCreateDemand}>
@@ -143,18 +115,18 @@ export function CreateDemand() {
             {isAdminGeral && (
               <Select
                 label="Secretaria Vinculada"
-                placeholder={loadingData ? 'Carregando secretarias...' : 'Para qual secretaria é este chamado?'}
-                data={departments.map(d => ({ value: d.id, label: `SEC ${d.code} - ${d.name}` }))}
+                placeholder={loadingData ? 'Carregando...' : 'Selecione a secretaria'}
+                data={orgUnits.map((u) => ({ value: u.id, label: `${u.code} — ${u.name}` }))}
                 disabled={loadingData}
                 required
-                value={selectedDepartmentId}
-                onChange={setSelectedDepartmentId}
+                value={departmentId}
+                onChange={setDepartmentId}
               />
             )}
 
             <TextInput
-              label="Título Resumido"
-              placeholder="Ex: Computador da recepção não liga"
+              label="Título"
+              placeholder="ex: Computador da recepção não liga"
               required
               value={title}
               onChange={(e) => setTitle(e.currentTarget.value)}
@@ -162,7 +134,7 @@ export function CreateDemand() {
 
             <Textarea
               label="Descrição Detalhada do Problema"
-              placeholder="Descreva detalhadamente o que está acontecendo..."
+              placeholder="Descreva o problema em detalhes..."
               required
               minRows={4}
               value={description}
@@ -170,25 +142,25 @@ export function CreateDemand() {
             />
 
             <TextInput
-              label="Tombamento / Patrimônio do Equipamento (Opcional)"
-              placeholder="Ex: PM-CRA-2026-XXXX"
+              label="Tombamento / Patrimônio (Opcional)"
+              placeholder="ex: PM-CRA-2026-XXXX"
               value={assetTag}
               onChange={(e) => setAssetTag(e.currentTarget.value)}
             />
 
             <Select
               label="Tipo de Atendimento Necessário"
-              placeholder={loadingData ? 'Carregando categorias...' : 'Selecione a categoria'}
-              data={specialties.map(spec => ({ value: spec.code, label: spec.name }))}
+              placeholder={loadingData ? 'Carregando...' : 'Selecione a especialidade'}
+              data={specialties.map((s) => ({ value: s.code, label: s.name }))}
               disabled={loadingData}
               required
               value={specialtyCode}
               onChange={setSpecialtyCode}
             />
 
-            <Button 
-              type="submit" 
-              color="green.8" 
+            <Button
+              type="submit"
+              color="green.8"
               loading={submitting}
               mt="md"
               style={{ fontWeight: 700 }}
