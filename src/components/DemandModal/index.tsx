@@ -1,13 +1,28 @@
-import { Modal, Button, Group, Text, Badge, Stack, TextInput, Textarea, Select, Divider, Box, SimpleGrid, Alert } from '@mantine/core';
-import { IconHammer, IconBuildingCommunity, IconUserCheck, IconAlertCircle, IconUser } from '@tabler/icons-react';
+import {
+  Modal, Button, Group, Text, Badge, Stack, Textarea,
+  Select, Divider, Box, Alert, Tabs, Timeline, Loader, Center,
+} from '@mantine/core';
+import {
+  IconBuildingCommunity, IconUserCheck,
+  IconAlertCircle, IconUser, IconClockHour4, IconHistory,
+} from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { useState, useEffect } from 'react';    
+import { useState, useEffect, useContext } from 'react';
+import { AxiosError } from 'axios';
 import { api } from '../../services/api';
-import type { Demand, StatusType } from '../../pages/Demands';
+import { AuthContext } from '../../contexts/AuthContext';
+import type { Demand } from '../../pages/Demands';
+import type { StatusType } from '../../types';
 
-interface Department {
+interface Department { id: string; name: string; }
+
+interface HistoryEntry {
   id: string;
-  name: string;
+  demandId?: string;
+  action: string;
+  justification?: string | null;
+  createdAt: string;
+  createdBy?: string;
 }
 
 interface DemandModalProps {
@@ -16,56 +31,88 @@ interface DemandModalProps {
   demand: Demand | null;
   onUpdate: () => void;
   departments: Department[];
-  isAdminView?: boolean; // Propriedade opcional para ativar auditorias do Admin
+  isAdminView?: boolean;
 }
 
-export function DemandModal({ opened, onClose, demand, onUpdate, departments, isAdminView = false }: DemandModalProps) {
+const STATUS_OPTIONS = [
+  { value: 'TODO', label: 'A Fazer' },
+  { value: 'IN_PROGRESS', label: 'Em Andamento' },
+  { value: 'DONE', label: 'Concluido' },
+  { value: 'INTERRUPTED', label: 'Interrompido' },
+];
+
+const STATUS_LABELS: Record<string, string> = {
+  TODO: 'A Fazer', IN_PROGRESS: 'Em Andamento', DONE: 'Concluido',
+  INTERRUPTED: 'Interrompido', CREATED: 'Criado', ASSIGNED: 'Atribuido', NOTE_UPDATED: 'Nota Atualizada',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  TODO: 'gray', IN_PROGRESS: 'blue', DONE: 'green',
+  INTERRUPTED: 'red', CREATED: 'teal', ASSIGNED: 'violet', NOTE_UPDATED: 'orange',
+};
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function mapActionLabel(action: string): string {
+  if (STATUS_LABELS[action]) return STATUS_LABELS[action];
+  if (action.includes('->')) {
+    const parts = action.split('->');
+    return (STATUS_LABELS[parts[0]] ?? parts[0]) + ' -> ' + (STATUS_LABELS[parts[1]] ?? parts[1]);
+  }
+  return action;
+}
+
+function mapActionColor(action: string): string {
+  if (STATUS_COLORS[action]) return STATUS_COLORS[action];
+  if (action.includes('->')) return STATUS_COLORS[action.split('->')[1]] ?? 'gray';
+  return 'gray';
+}
+
+
+
+export function DemandModal({
+  opened, onClose, demand, onUpdate, departments, isAdminView = false,
+}: DemandModalProps) {
+  const { user } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>('');
-  const [assetTag, setAssetTag] = useState('');
-  const [observacao, setObservacao] = useState('');
+  const [note, setNote] = useState('');
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<string | null>('details');
 
   useEffect(() => {
-    if (opened && demand) {
-      const timer = setTimeout(() => {
-        setStatus(demand.status || 'A_FAZER');
-        setAssetTag(demand.asset_tag || '');
-        setObservacao('');
-      }, 0);
+    if (!opened || !demand) return;
+    setActiveTab('details');
+    setHistory([]);
+    const timer = setTimeout(() => {
+      setStatus(demand.status ?? 'TODO');
+      setNote(demand.currentTechnicalNote ?? '');
+    }, 0);
+    setHistoryLoading(true);
 
-      // MARCAÇÃO DE LEITURA AUTOMÁTICA: 
-      // Se um técnico abre uma demanda que ainda consta como não lida, dispara a atualização.
-      if (!demand.viewed && !isAdminView) {
-        api.patch(`/demands/${demand.id}/view`, { viewed: true })
-          .then(() => onUpdate())
-          .catch((err) => console.error("Aviso: Rota de leitura automática não respondeu:", err));
-      }
+    api.get("/demands/" + demand.id + "/history")
+      .then((res) => { setHistory(Array.isArray(res.data) ? res.data : []); })
+      .catch(() => setHistory([]))
+      .finally(() => setHistoryLoading(false));
+    return () => clearTimeout(timer);
+  }, [demand?.id, opened]); // eslint-disable-line react-hooks/exhaustive-deps
 
-      return () => clearTimeout(timer);
-    }
-  }, [demand, opened, isAdminView, onUpdate]);
-
-  const departmentName = departments.find(dep => dep.id === demand?.departmentId)?.name || 'SECRETARIA NÃO ENCONTRADA';
-
-  const handleAssumirDemanda = async () => {
-    if (!demand) return;
+  const handleTakeOver = async () => {
+    if (!demand || !user) return;
     setLoading(true);
-
     try {
-      await api.patch(`/demands/${demand.id}/status`, {
-        status: 'EM_ANDAMENTO',
-        asset_tag: assetTag.trim() || null,
-        description: "Chamado assumido pelo técnico via painel operacional SAGE.",
-      });
+      await api.patch(`/demands/${demand.id}/assignee`, { assigneeUserId: user.id });
+      await api.patch(`/demands/${demand.id}/status`, { status: "IN_PROGRESS" });
       onUpdate();
       onClose();
-    } catch (error) {
-      console.error("Erro ao assumir demanda:", error);
-      notifications.show({
-        title: 'Erro operacional',
-        message: 'Não foi possível assumir o chamado. Verifique sua conexão.',
-        color: 'red',
-      });
+    } catch {
+      notifications.show({ title: "Erro operacional", message: "Não foi possível assumir o chamado.", color: "red" });
     } finally {
       setLoading(false);
     }
@@ -73,32 +120,20 @@ export function DemandModal({ opened, onClose, demand, onUpdate, departments, is
 
   const handleSave = async () => {
     if (!demand) return;
-
-    if ((status === 'INTERROMPIDO' || status === 'CANCELADO') && observacao.trim().length < 15) {
-      notifications.show({
-        title: 'Relatório insuficiente',
-        message: 'Para interromper ou cancelar, informe um relatório com no mínimo 15 caracteres.',
-        color: 'orange',
-      });
+    if (status === "INTERRUPTED" && note.trim().length < 15) {
+      notifications.show({ title: "Relatorio insuficiente", message: "Justificativa com no minimo 15 caracteres.", color: "orange" });
       return;
     }
-
     setLoading(true);
     try {
-      await api.patch(`/demands/${demand.id}/status`, {
-        status: status as StatusType,
-        asset_tag: assetTag.trim() || null,
-        description: observacao.trim() || "Atualização técnica realizada via painel gerencial SAGE",
-      });
+      const payload: Record<string, string | null> = { status: status as StatusType };
+      if (note.trim()) payload.justification = note.trim();
+      await api.patch("/demands/" + demand.id + "/status", payload);
       onUpdate();
       onClose();
-    } catch (error) {
-      console.error("Erro ao salvar alterações na demanda:", error);
-      notifications.show({
-        title: 'Falha na atualização',
-        message: 'Erro ao salvar dados. Verifique sua conexão e permissões.',
-        color: 'red',
-      });
+    } catch (err: unknown) {
+      const axiosErr = err as AxiosError<{ error?: string }>;
+      notifications.show({ title: "Falha na atualizacao", message: axiosErr.response?.data?.error ?? "Erro ao salvar.", color: "red" });
     } finally {
       setLoading(false);
     }
@@ -106,107 +141,100 @@ export function DemandModal({ opened, onClose, demand, onUpdate, departments, is
 
   if (!demand) return null;
 
-  const isSemTecnico = !demand.current_technician_id && !demand.technician?.name;
-  
-  // CORREÇÃO AQUI: Removemos o operador alternativo para 'demand.technician_name' que quebrava o build
-  const nomeDoTecnico = demand.technician?.name;
+  const departmentName = departments.find((dep) => dep.id === demand.departmentId)?.name ?? demand.department?.name ?? "SECRETARIA NAO ENCONTRADA";
+  const isSemTecnico = !demand.assigneeUserId && !demand.technician?.name;
+  const technicianName = demand.technician?.name;
+  const isTecnico = user?.role === "SAGED_TECNICO" || user?.role === "SAGED_TECNICO_LIDER";
+  void isAdminView;
 
   return (
-    <Modal 
-      opened={opened} 
-      onClose={onClose} 
-      title={<Text fw={900}>DETALHES DA DEMANDA</Text>} 
-      size="lg" 
-      radius="md" 
-      centered
-    >
-      <Stack gap="md">
-        <Group justify="space-between">
-          <Group gap="xs">
-            <IconBuildingCommunity size={18} color="blue" />
-            <Text fw={700} size="sm">{departmentName.toUpperCase()}</Text>
-          </Group>
-          <Group gap="xs">
-            {isAdminView && (
-              <Badge color={demand.viewed ? "green" : "yellow"} variant="light">
-                {demand.viewed ? "Lida por técnico" : "Não Visualizada"}
-              </Badge>
+    <Modal opened={opened} onClose={onClose} title={<Text fw={900}>DETALHES DA DEMANDA</Text>} size="lg" radius="md" centered>
+      <Group justify="space-between" mb="md">
+        <Group gap="xs">
+          <IconBuildingCommunity size={18} color="blue" />
+          <Text fw={700} size="sm">{departmentName.toUpperCase()}</Text>
+        </Group>
+        <Badge color="blue">#{demand.protocol}</Badge>
+      </Group>
+      <Tabs value={activeTab} onChange={setActiveTab}>
+        <Tabs.List mb="md">
+          <Tabs.Tab value="details" leftSection={<IconUser size={14} />}>Detalhes</Tabs.Tab>
+          <Tabs.Tab value="history" leftSection={<IconHistory size={14} />}>Historico</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="details">
+          <Stack gap="md">
+            <Box bg="gray.0" p="md" style={{ borderLeft: "4px solid green", borderRadius: "4px" }}>
+              <Text size="xs" fw={800} c="dimmed">TITULO: {demand.title}</Text>
+              <Text size="sm" mt={5}>{demand.description}</Text>
+            </Box>
+            {demand.currentTechnicalNote && (
+              <Box bg="green.0" p="md" style={{ borderLeft: "4px solid #2f9e44", borderRadius: "4px" }}>
+                <Text size="xs" fw={800} c="green.9">OBSERVACAO TECNICA ATUAL</Text>
+                <Text size="sm" mt={5}>{demand.currentTechnicalNote}</Text>
+              </Box>
             )}
-            <Badge color="blue">#{demand.protocol}</Badge>
-          </Group>
-        </Group>
-
-        <Box bg="gray.0" p="md" style={{ borderLeft: '4px solid green', borderRadius: '4px' }}>
-          <Text size="xs" fw={800} c="dimmed">TÍTULO: {demand.title}</Text>
-          <Text size="sm" mt={5}>{demand.description}</Text>
-        </Box>
-
-        <Divider label="Painel Técnico de Controle" labelPosition="center" />
-
-        {/* Exibição informativa do técnico atual responsável */}
-        <Group gap="xs" px="xs" py="4px" style={{ background: '#f8f9fa', borderRadius: '4px' }}>
-          <IconUser size={16} color="gray" />
-          <Text size="xs" fw={600} c="dimmed">Responsável Atual:</Text>
-          <Text size="xs" fw={700} c={nomeDoTecnico ? "green.8" : "orange.8"}>
-            {nomeDoTecnico ? nomeDoTecnico.toUpperCase() : "AGUARDANDO TÉCNICO DA ESPECIALIDADE"}
-          </Text>
-        </Group>
-
-        {isSemTecnico ? (
-          <Alert icon={<IconAlertCircle size={16} />} title="Chamado Disponível" color="blue" radius="md">
-            <Text size="sm" mb="md">
-              Esta demanda ainda não possui um técnico responsável vinculado. Você deseja assumir a responsabilidade por este atendimento?
-            </Text>
-            <Group justify="flex-end">
-              <Button 
-                color="blue" 
-                leftSection={<IconUserCheck size={16} />} 
-                loading={loading} 
-                onClick={handleAssumirDemanda}
-              >
-                Assumir Atendimento
-              </Button>
+            <Divider label="Painel Tecnico de Controle" labelPosition="center" />
+            <Group gap="xs" px="xs" py="4px" style={{ background: "#f8f9fa", borderRadius: "4px" }}>
+              <IconUser size={16} color="gray" />
+              <Text size="xs" fw={600} c="dimmed">Responsavel Atual:</Text>
+              <Text size="xs" fw={700} c={technicianName ? "green.8" : "orange.8"}>
+                {technicianName ? technicianName.toUpperCase() : "AGUARDANDO TECNICO DA ESPECIALIDADE"}
+              </Text>
             </Group>
-          </Alert>
-        ) : (
-          <>
-            <SimpleGrid cols={2}>
-              <TextInput 
-                label="Número de Patrimônio (Asset Tag)" 
-                value={assetTag} 
-                onChange={(e) => setAssetTag(e.currentTarget.value)} 
-                leftSection={<IconHammer size={16}/>} 
-                placeholder="Ex: 123456"
-              />
-              <Select 
-                label="Status Operacional" 
-                value={status} 
-                onChange={(v) => setStatus(v || '')} 
-                data={[
-                  {value:'A_FAZER', label:'A Fazer'}, 
-                  {value:'EM_ANDAMENTO', label:'Em Andamento'}, 
-                  {value:'CONCLUIDO', label:'Concluído'}, 
-                  {value:'INTERROMPIDO', label:'Interrompido'}
-                ]} 
-              />
-            </SimpleGrid>
-
-            <Textarea 
-              label={(status === 'INTERROMPIDO' || status === 'CANCELADO') ? "Justificativa Obrigatória (Mínimo 15 caracteres)" : "Relatório Técnico / Observações"} 
-              minRows={3} 
-              placeholder="Descreva detalhadamente as ações de manutenção tomadas ou a justificativa para paralisação..."
-              value={observacao} 
-              onChange={(e) => setObservacao(e.currentTarget.value)} 
-              required={status === 'INTERROMPIDO' || status === 'CANCELADO'}
-            />
-
-            <Group justify="flex-end" mt="md">
-              <Button variant="subtle" onClick={onClose} disabled={loading}>Cancelar</Button>
-              <Button color="green.8" onClick={handleSave} loading={loading}>Salvar Alterações</Button>
-            </Group>
-          </>
-        )}
-      </Stack>
+            {isSemTecnico && isTecnico ? (
+              <Alert icon={<IconAlertCircle size={16} />} title="Chamado Disponivel" color="blue" radius="md">
+                <Text size="sm" mb="md">Esta demanda ainda nao possui tecnico responsavel. Deseja assumir o atendimento?</Text>
+                <Group justify="flex-end">
+                  <Button color="blue" leftSection={<IconUserCheck size={16} />} loading={loading} onClick={handleTakeOver}>
+                    Assumir Atendimento
+                  </Button>
+                </Group>
+              </Alert>
+            ) : (
+              <>
+                <Select label="Status Operacional" value={status} onChange={(v) => setStatus(v ?? "")} data={STATUS_OPTIONS} />
+                <Textarea
+                  label={status === "INTERRUPTED" ? "Justificativa Obrigatoria (Minimo 15 caracteres)" : "Relatorio Tecnico / Observacoes"}
+                  minRows={3}
+                  placeholder={status === "INTERRUPTED" ? "Descreva o motivo da interrupcao..." : "Descreva as acoes realizadas ou observacoes..."}
+                  value={note}
+                  onChange={(e) => setNote(e.currentTarget.value)}
+                  required={status === "INTERRUPTED"}
+                />
+                <Group justify="flex-end" mt="md">
+                  <Button variant="subtle" onClick={onClose} disabled={loading}>Cancelar</Button>
+                  <Button color="green.8" onClick={handleSave} loading={loading}>Salvar Alteracoes</Button>
+                </Group>
+              </>
+            )}
+          </Stack>
+        </Tabs.Panel>
+        <Tabs.Panel value="history">
+          {historyLoading ? (
+            <Center py="xl"><Loader size="sm" color="green.8" /></Center>
+          ) : history.length === 0 ? (
+            <Center py="xl"><Text size="xs" c="dimmed" fw={600}>Nenhum evento registrado para esta demanda.</Text></Center>
+          ) : (
+            <Timeline active={history.length - 1} bulletSize={20} lineWidth={2} mt="sm">
+              {history.map((entry) => (
+                <Timeline.Item
+                  key={entry.id}
+                  bullet={<IconClockHour4 size={12} />}
+                  title={
+                    <Group gap={6} wrap="nowrap">
+                      <Badge size="xs" color={mapActionColor(entry.action)} variant="light">{mapActionLabel(entry.action)}</Badge>
+                      <Text size="xs" fw={700} c="gray.7">{entry.createdBy ?? "Sistema"}</Text>
+                    </Group>
+                  }
+                >
+                  {entry.justification && <Text size="xs" c="dimmed" mt={2}>{entry.justification}</Text>}
+                  <Text size="10px" c="gray.5" mt={4}>{formatDate(entry.createdAt)}</Text>
+                </Timeline.Item>
+              ))}
+            </Timeline>
+          )}
+        </Tabs.Panel>
+      </Tabs>
     </Modal>
   );
 }

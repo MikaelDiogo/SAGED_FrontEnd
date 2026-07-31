@@ -12,6 +12,10 @@ import { api } from '../services/api';
 import { DemandCard } from '../components/DemandCard';
 import { DemandModal } from '../components/DemandModal';
 import { AuthContext } from '../contexts/AuthContext';
+import { TourPageGate } from '../components/Tour';
+import { Footer } from '../components/Footer';
+import { HEADER_HEIGHT_EXPANDED_DESKTOP } from '../components/Header';
+import { QUEUE_LABELS } from '../constants/queues';
 import type { StatusType } from '../types';
 
 export interface Demand {
@@ -52,11 +56,11 @@ interface Specialty {
   name: string;
 }
 
-const COLUMNS: { id: StatusType; label: string; color: string }[] = [
-  { id: 'A_FAZER', label: 'A Fazer', color: 'gray' },
-  { id: 'EM_ANDAMENTO', label: 'Em Andamento', color: 'blue' },
-  { id: 'CONCLUIDO', label: 'Concluído', color: 'green' },
-  { id: 'INTERROMPIDO', label: 'Interrompido', color: 'red' },
+const COLUMNS: { id: StatusType; label: string; color: string; bg: string; tourId: string }[] = [
+  { id: 'TODO', label: 'A Fazer', color: 'gray', bg: 'gray.1', tourId: 'demands-col-afazer' },
+  { id: 'IN_PROGRESS', label: 'Em Andamento', color: 'blue', bg: 'blue.0', tourId: 'demands-col-andamento' },
+  { id: 'DONE', label: 'Concluido', color: 'green', bg: 'green.0', tourId: 'demands-col-concluido' },
+  { id: 'INTERRUPTED', label: 'Interrompido', color: 'red', bg: 'red.0', tourId: 'demands-col-interrompido' },
 ];
 
 export function Demands() {
@@ -181,6 +185,13 @@ export function Demands() {
     [fetchDemands]
   );
 
+  const VALID_TRANSITIONS: Record<StatusType, StatusType[]> = {
+    TODO:        ['IN_PROGRESS'],
+    IN_PROGRESS: ['DONE', 'INTERRUPTED'],
+    DONE:        [],
+    INTERRUPTED: [],
+  };
+
   const onDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
     if (!destination || destination.droppableId === source.droppableId) return;
@@ -193,26 +204,28 @@ export function Demands() {
       return;
     }
 
+    const fromStatus = source.droppableId as StatusType;
     const newStatus = destination.droppableId as StatusType;
 
-    if (newStatus === 'INTERROMPIDO') {
-      setPendingDrag({ demandId: draggableId, newStatus });
-      return;
-    }
-
-    await applyStatusChange(draggableId, newStatus);
-  };
-
-  const handleConfirmInterrupt = async () => {
-    if (!pendingDrag) return;
-    if (justification.trim().length < 15) {
+    if (!VALID_TRANSITIONS[fromStatus]?.includes(newStatus)) {
       notifications.show({
-        message: 'Justificativa deve ter no mínimo 15 caracteres.',
+        message: `Transição ${fromStatus} → ${newStatus} não é permitida.`,
         color: 'orange',
       });
       return;
     }
-    await applyStatusChange(pendingDrag.demandId, pendingDrag.newStatus, justification.trim());
+
+    setPendingDrag({ demandId: draggableId, newStatus });
+  };
+
+  const handleConfirmMove = async () => {
+    if (!pendingDrag) return;
+    const isInterrupted = pendingDrag.newStatus === 'INTERRUPTED';
+    if (isInterrupted && justification.trim().length < 15) {
+      notifications.show({ message: 'Justificativa deve ter no mínimo 15 caracteres.', color: 'orange' });
+      return;
+    }
+    await applyStatusChange(pendingDrag.demandId, pendingDrag.newStatus, justification.trim() || undefined);
     setPendingDrag(null);
     setJustification('');
   };
@@ -231,22 +244,28 @@ export function Demands() {
 
   const getTechInitials = (demand: Demand) => {
     if (demand.technician?.name) {
-      return demand.technician.name
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .substring(0, 2)
-        .toUpperCase();
+      return demand.technician.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
     }
     return demand.assigneeUserId ? 'TEC' : '';
   };
 
+  const getTechName = (demand: Demand) => {
+    if (demand.technician?.name) return demand.technician.name;
+    if (demand.assigneeUserId) return 'Técnico Atribuído';
+    return undefined;
+  };
+
+  const queueTitle = queueId
+    ? (QUEUE_LABELS[queueId] ?? specialties.find((s) => s.id === queueId)?.name ?? queueId).toUpperCase()
+    : 'QUADRO DE DEMANDAS';
+
   return (
     <Box
-      style={{ height: 'calc(100vh - var(--pvh-current-height, 146px))', display: 'flex', flexDirection: 'column' }}
+      style={{ minHeight: `calc(100vh - ${HEADER_HEIGHT_EXPANDED_DESKTOP}px)`, display: 'flex', flexDirection: 'column' }}
       bg="#f1f3f5"
     >
       <Box px="xs" flex={1} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+      <TourPageGate phaseId="demands" />
         <Paper withBorder p="xs" radius="sm" mb="xs" shadow="xs">
           <Group justify="space-between">
             <Group gap="sm">
@@ -255,10 +274,10 @@ export function Demands() {
               </UnstyledButton>
               <Stack gap={0}>
                 <Title order={5} c="green.9" fw={900}>
-                  {currentUnitName}
+                  {queueTitle}
                 </Title>
                 <Text size="10px" fw={700} c="dimmed">
-                  SAGED — MONITORAMENTO EM TEMPO REAL
+                  {currentUnitName} · SAGED MONITORAMENTO
                 </Text>
               </Stack>
             </Group>
@@ -296,7 +315,7 @@ export function Demands() {
 
         <DragDropContext onDragEnd={onDragEnd}>
           <Box
-            style={{ display: 'flex', flex: 1, gap: '8px', minHeight: 0, paddingBottom: '10px' }}
+            data-tour="demands-board" style={{ display: 'flex', flex: 1, gap: '8px', minHeight: 0, paddingBottom: '10px' }}
           >
             {COLUMNS.map((col) => {
               const columnDemands = filteredDemands.filter((d) => d.status === col.id);
@@ -308,16 +327,16 @@ export function Demands() {
                   <Paper
                     withBorder
                     radius="md"
-                    bg="gray.1"
+                    bg={col.bg}
                     style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
                   >
                     <Box
                       p="sm"
-                      bg="white"
+                      
                       style={{ borderBottom: `3px solid var(--mantine-color-${col.color}-6)` }}
                     >
                       <Group justify="space-between">
-                        <Text fw={800} size="xs" tt="uppercase">{col.label}</Text>
+                        <Text fw={800} size="xs" tt="uppercase" c={col.color + '.9'}>{col.label}</Text>
                         <Badge variant="light" color={col.color}>
                           {loading ? '...' : columnDemands.length}
                         </Badge>
@@ -348,7 +367,7 @@ export function Demands() {
                                       description={demand.description}
                                       priority={
                                         demand.priority ??
-                                        (demand.status === 'INTERROMPIDO' ? 'Crítica' : 'Alta')
+                                        (demand.status === 'INTERRUPTED' ? 'Crítica' : 'Alta')
                                       }
                                       departmentName={
                                         demand.department?.name ??
@@ -356,7 +375,7 @@ export function Demands() {
                                         'Sem Setor'
                                       }
                                       techInitials={getTechInitials(demand)}
-                                      technicianName={demand.technician?.name}
+                                      technicianName={getTechName(demand)}
                                       viewed={demand.viewed ?? false}
                                       isAdminView={isAdminGeral}
                                       onClick={() => {
@@ -381,6 +400,7 @@ export function Demands() {
         </DragDropContext>
       </Box>
 
+      <Footer />
       <DemandModal
         opened={modalOpened}
         onClose={() => setModalOpened(false)}
@@ -393,19 +413,33 @@ export function Demands() {
       <Modal
         opened={!!pendingDrag}
         onClose={() => { setPendingDrag(null); setJustification(''); }}
-        title={<Text fw={900}>Justificativa de Interrupção</Text>}
+        title={
+          <Text fw={900}>
+            {pendingDrag?.newStatus === 'INTERRUPTED' ? 'Justificativa de Interrupção' :
+             pendingDrag?.newStatus === 'DONE' ? 'Registrar Conclusão' :
+             'Registrar Início do Atendimento'}
+          </Text>
+        }
         centered
         size="md"
       >
         <Stack gap="md">
           <Text size="sm" c="dimmed">
-            Informe o motivo (mínimo 15 caracteres) para interromper este chamado.
+            {pendingDrag?.newStatus === 'INTERRUPTED'
+              ? 'Informe o motivo (mínimo 15 caracteres) para interromper este chamado.'
+              : pendingDrag?.newStatus === 'DONE'
+              ? 'Descreva o que foi realizado para concluir o atendimento.'
+              : 'Descreva a ação inicial ou confirmação de início do atendimento.'}
           </Text>
           <Textarea
-            label="Justificativa"
-            placeholder="Descreva o motivo da interrupção..."
+            label={pendingDrag?.newStatus === 'INTERRUPTED' ? 'Justificativa (obrigatória)' : 'Observação técnica (opcional)'}
+            placeholder={
+              pendingDrag?.newStatus === 'INTERRUPTED'
+                ? 'Descreva o motivo da interrupção...'
+                : 'Descreva as ações realizadas ou observações relevantes...'
+            }
             minRows={4}
-            required
+            required={pendingDrag?.newStatus === 'INTERRUPTED'}
             value={justification}
             onChange={(e) => setJustification(e.currentTarget.value)}
           />
@@ -413,8 +447,13 @@ export function Demands() {
             <Button variant="subtle" onClick={() => { setPendingDrag(null); setJustification(''); }}>
               Cancelar
             </Button>
-            <Button color="red" onClick={handleConfirmInterrupt}>
-              Confirmar Interrupção
+            <Button
+              color={pendingDrag?.newStatus === 'INTERRUPTED' ? 'red' : pendingDrag?.newStatus === 'DONE' ? 'green' : 'blue'}
+              onClick={handleConfirmMove}
+            >
+              {pendingDrag?.newStatus === 'INTERRUPTED' ? 'Confirmar Interrupção' :
+               pendingDrag?.newStatus === 'DONE' ? 'Confirmar Conclusão' :
+               'Confirmar Início'}
             </Button>
           </Group>
         </Stack>

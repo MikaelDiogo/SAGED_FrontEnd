@@ -1,4 +1,4 @@
-import { Text, Avatar, Group, Badge, Paper, Box } from '@mantine/core';
+import { Text, Group, Badge, Paper, Box } from '@mantine/core';
 
 interface TechActivityProps {
   techName: string;
@@ -12,14 +12,11 @@ export function TechActivity({ techName, demand, status, reason, time }: TechAct
   return (
     <Paper withBorder p="sm" radius="md" mb="xs">
       <Group justify="space-between" mb="xs">
-        <Group>
-          <Avatar color="crateus-green.9" radius="xl">{techName.substring(0, 2)}</Avatar>
-          <Box>
-            <Text size="sm" fw={500}>{techName}</Text>
-            <Text size="xs" c="dimmed">{demand}</Text>
-          </Box>
-        </Group>
-        <Badge color={status === 'INTERROMPIDO' ? 'red' : 'blue'} variant="light">
+        <Box>
+          <Text size="sm" fw={500}>{techName}</Text>
+          <Text size="xs" c="dimmed">{demand}</Text>
+        </Box>
+        <Badge color={status === 'INTERRUPTED' ? 'red' : 'blue'} variant="light">
           {status}
         </Badge>
       </Group>

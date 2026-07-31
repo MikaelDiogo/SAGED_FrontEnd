@@ -1,3 +1,9 @@
+# Reference material — not source code
+_zip_extracted/
+*.zip
+FRONTEND_INTEGRACAO_SAGED.md
+write_modal.sh
+
 # Logs
 logs
 *.log

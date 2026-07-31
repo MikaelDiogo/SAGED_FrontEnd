@@ -1,455 +1,494 @@
-import { 
-  Container, Grid, Paper, Text, Group, Title, Stack, 
-  Select, Button, Divider, Box, SimpleGrid, RingProgress,
-  Badge, Center, Loader, type RingProgressSection
+import {
+  Badge, Box, Button, Checkbox, Container, Divider, Grid, Group,
+  Loader, MultiSelect, Paper, RingProgress, SimpleGrid, Stack,
+  Table, Text, TextInput, Title, Center,
 } from '@mantine/core';
-import { AreaChart } from '@mantine/charts'; 
-import { 
-  IconDownload, IconTrendingUp, 
-  IconClock, IconChecklist, IconAlertTriangle 
+import { AreaChart } from '@mantine/charts';
+import {
+  IconAlertTriangle, IconChartBar, IconClock, IconDownload,
+  IconFilter, IconUsers,
 } from '@tabler/icons-react';
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState, useContext } from 'react';
+import { notifications } from '@mantine/notifications';
+import { TourPageGate } from '../components/Tour';
 import { api } from '../services/api';
-import axios, { AxiosError } from 'axios';
-import type { User } from '../types';
+import { AuthContext } from '../contexts/AuthContext';
+import type { Demand } from './Demands';
 
-interface Department {
+interface OrgUnit { id: string; name: string; code: string; }
+interface Specialty { id: string; code: string; name: string; }
+interface Page<T> { content: T[]; totalElements: number; totalPages: number; }
+
+type Option = { value: string; label: string };
+
+interface Breakdown {
   id: string;
   name: string;
-  code: string;
+  total: number;
+  concluded: number;
+  pending: number;
+  interrupted: number;
+  unassigned: number;
+  resolutionRate: number;
+  sharePercent: number;
 }
 
-interface ManagementReport {
-  period: string;
+interface DemandRow {
+  id: string;
+  protocol: string;
+  title: string;
+  departmentName: string;
+  categoryCode: string;
+  statusLabel: string;
+  technicianName: string | null;
+  ageHours: number;
+}
+
+interface AdvancedReport {
+  generatedAt: string;
+  period: { label: string };
   scope: string;
   metrics: {
     total: number;
-    resolutionRate: string;
-    avgTime: string;
+    concluded: number;
+    pending: number;
     interrupted: number;
+    unassigned: number;
+    resolutionRate: number;
+    pendingRate: number;
+    interruptionRate: number;
+    unassignedRate: number;
+    avgResolutionHours: number;
   };
   statusCounts: Record<string, number>;
-  technicians: Array<{
-    name: string;
-    count: number;
-    concluded: number;
-  }>;
-  timelineData?: Array<{
-    period: string;
-    chamados: number;
-    concluidos: number;
-  }>;
+  departments: Breakdown[];
+  categories: Breakdown[];
+  timelineData: Array<{ period: string; opened: number; concluded: number }>;
+  criticalDemands: DemandRow[];
+  demands: DemandRow[];
 }
 
-interface DistributionSection extends RingProgressSection {
-  label: string;
+const STATUS_LABELS: Record<string, string> = {
+  TODO: 'A Fazer',
+  IN_PROGRESS: 'Em Andamento',
+  DONE: 'Concluído',
+  INTERRUPTED: 'Interrompido',
+};
+
+function todayInput() { return new Date().toISOString().slice(0, 10); }
+function monthStartInput() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+}
+function pct(part: number, total: number) {
+  return total > 0 ? Math.round((part / total) * 100) : 0;
+}
+function ageHours(createdAt: string) {
+  return Math.round((Date.now() - new Date(createdAt).getTime()) / 3_600_000);
+}
+
+function buildReport(
+  demands: Demand[],
+  orgUnits: OrgUnit[],
+  specialties: Specialty[],
+  startDate: string,
+  endDate: string,
+  departmentIds: string[],
+  statuses: string[],
+  techTypeCodes: string[],
+  onlyUnassigned: boolean,
+  onlyCritical: boolean,
+  includeDemandList: boolean,
+): AdvancedReport {
+  const start = new Date(startDate);
+  const end = new Date(endDate + 'T23:59:59');
+
+  let filtered = demands.filter(d => {
+    const date = new Date(d.createdAt);
+    return date >= start && date <= end;
+  });
+
+  if (departmentIds.length > 0) filtered = filtered.filter(d => departmentIds.includes(d.departmentId));
+  if (statuses.length > 0) filtered = filtered.filter(d => statuses.includes(d.status));
+  if (techTypeCodes.length > 0) filtered = filtered.filter(d => techTypeCodes.includes(d.specialtyId));
+  if (onlyUnassigned) filtered = filtered.filter(d => !d.assigneeUserId);
+  if (onlyCritical) filtered = filtered.filter(d => d.status === 'INTERRUPTED');
+
+  const total = filtered.length;
+  const concluded = filtered.filter(d => d.status === 'DONE').length;
+  const pending = filtered.filter(d => d.status === 'TODO' || d.status === 'IN_PROGRESS').length;
+  const interrupted = filtered.filter(d => d.status === 'INTERRUPTED').length;
+  const unassigned = filtered.filter(d => !d.assigneeUserId).length;
+
+  const statusCounts: Record<string, number> = {
+    TODO: filtered.filter(d => d.status === 'TODO').length,
+    IN_PROGRESS: filtered.filter(d => d.status === 'IN_PROGRESS').length,
+    DONE: concluded,
+    INTERRUPTED: interrupted,
+  };
+
+  const deptBreakdown: Breakdown[] = orgUnits.map(ou => {
+    const sub = filtered.filter(d => d.departmentId === ou.id);
+    const c = sub.filter(d => d.status === 'DONE').length;
+    const p = sub.filter(d => d.status === 'TODO' || d.status === 'IN_PROGRESS').length;
+    const it = sub.filter(d => d.status === 'INTERRUPTED').length;
+    const ua = sub.filter(d => !d.assigneeUserId).length;
+    return { id: ou.id, name: ou.name, total: sub.length, concluded: c, pending: p, interrupted: it, unassigned: ua, resolutionRate: pct(c, sub.length), sharePercent: pct(sub.length, total) };
+  }).filter(b => b.total > 0).sort((a, b) => b.total - a.total);
+
+  const catBreakdown: Breakdown[] = specialties.map(sp => {
+    const sub = filtered.filter(d => d.specialtyId === sp.id);
+    const c = sub.filter(d => d.status === 'DONE').length;
+    const p = sub.filter(d => d.status === 'TODO' || d.status === 'IN_PROGRESS').length;
+    const it = sub.filter(d => d.status === 'INTERRUPTED').length;
+    const ua = sub.filter(d => !d.assigneeUserId).length;
+    return { id: sp.id, name: sp.name, total: sub.length, concluded: c, pending: p, interrupted: it, unassigned: ua, resolutionRate: pct(c, sub.length), sharePercent: pct(sub.length, total) };
+  }).filter(b => b.total > 0).sort((a, b) => b.total - a.total);
+
+  // Timeline semanal
+  const weeks: Array<{ period: string; opened: number; concluded: number }> = [];
+  const span = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (7 * 86400000)));
+  for (let w = 0; w < Math.min(span, 8); w++) {
+    const ws = new Date(start.getTime() + w * 7 * 86400000);
+    const we = new Date(ws.getTime() + 7 * 86400000);
+    const opened = filtered.filter(d => { const dt = new Date(d.createdAt); return dt >= ws && dt < we; }).length;
+    const done = filtered.filter(d => { const dt = new Date(d.createdAt); return dt >= ws && dt < we && d.status === 'DONE'; }).length;
+    weeks.push({ period: `Sem ${w + 1}`, opened, concluded: done });
+  }
+
+  const toDemandRow = (d: Demand): DemandRow => ({
+    id: d.id,
+    protocol: d.protocol,
+    title: d.title,
+    departmentName: orgUnits.find(ou => ou.id === d.departmentId)?.name ?? 'Sem setor',
+    categoryCode: specialties.find(sp => sp.id === d.specialtyId)?.name ?? d.specialtyId ?? '',
+    statusLabel: STATUS_LABELS[d.status] ?? d.status,
+    technicianName: d.technician?.name ?? null,
+    ageHours: ageHours(d.createdAt),
+  });
+
+  const criticalDemands = filtered.filter(d => d.status === 'INTERRUPTED').map(toDemandRow);
+  const allRows = includeDemandList ? filtered.map(toDemandRow) : [];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    period: { label: `${startDate} → ${endDate}` },
+    scope: departmentIds.length === 0 ? 'Todas as unidades' : deptBreakdown.map(b => b.name).join(', '),
+    metrics: { total, concluded, pending, interrupted, unassigned, resolutionRate: pct(concluded, total), pendingRate: pct(pending, total), interruptionRate: pct(interrupted, total), unassignedRate: pct(unassigned, total), avgResolutionHours: 0 },
+    statusCounts,
+    departments: deptBreakdown,
+    categories: catBreakdown,
+    timelineData: weeks,
+    criticalDemands,
+    demands: allRows,
+  };
 }
 
 export function Reports() {
-  const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const isAdminGeral = user?.role === 'SAGED_ADMIN_GERAL';
 
-  // 1. Recupera o usuário logado e valida o papel (RBAC)
-  const loggedUser = useMemo<User | null>(() => {
-    const storageUser = localStorage.getItem('@SAGE:user');
-    return storageUser ? JSON.parse(storageUser) : null;
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+  const [allDemands, setAllDemands] = useState<Demand[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [report, setReport] = useState<AdvancedReport | null>(null);
+
+  const [startDate, setStartDate] = useState(monthStartInput());
+  const [endDate, setEndDate] = useState(todayInput());
+  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<string[]>([]);
+  const [techTypeCodes, setTechTypeCodes] = useState<string[]>([]);
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [onlyCritical, setOnlyCritical] = useState(false);
+  const [includeDemandList, setIncludeDemandList] = useState(true);
+
+  useEffect(() => {
+    async function loadOptions() {
+      try {
+        setLoadingOptions(true);
+        const [unitsRes, specsRes, demandsRes] = await Promise.all([
+          api.get<OrgUnit[]>('/org-units'),
+          api.get<Specialty[]>('/specialties'),
+          api.get<Page<Demand>>('/demands', { params: { size: 500 } }),
+        ]);
+        setOrgUnits(unitsRes.data ?? []);
+        setSpecialties(specsRes.data ?? []);
+        setAllDemands(demandsRes.data?.content ?? []);
+      } catch {
+        notifications.show({ title: 'Erro', message: 'Não foi possível carregar dados do relatório.', color: 'red' });
+      } finally {
+        setLoadingOptions(false);
+      }
+    }
+    loadOptions();
   }, []);
 
-  const userRole = useMemo(() => {
-    return loggedUser?.role?.trim().toUpperCase() || '';
-  }, [loggedUser]);
-
-  const isAdminGeral = useMemo(() => userRole === 'ADMIN_GERAL', [userRole]);
-  
-  // Filtros de Data
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(() => String(new Date().getMonth() + 1));
-  const [selectedYear, setSelectedYear] = useState<string | null>(() => String(new Date().getFullYear()));
-  
-  // Controle do filtro de unidades/secretarias
-  const [selectedUnit, setSelectedUnit] = useState<string | null>(() => {
-    if (!isAdminGeral && loggedUser?.departmentId) {
-      return loggedUser.departmentId;
-    }
-    return 'todas';
-  });
-  
-  const [loadingData, setLoadingData] = useState(true);
-  const [exporting, setExporting] = useState(false);
-
-  // Estados dos dados buscados da API do SAGED
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [reportData, setReportData] = useState<ManagementReport | null>(null);
-
-  // Carrega lista de secretarias apenas se for ADMIN_GERAL
-  useEffect(() => {
-    if (!isAdminGeral) return;
-    
-    const controller = new AbortController();
-
-    async function fetchDepartments() {
-      try {
-        const { data } = await api.get<Department[]>('/departments', { signal: controller.signal });
-        setDepartments(data);
-      } catch (err) {
-        if (axios.isCancel(err)) return;
-        const error = err as AxiosError;
-        if (error.response?.status === 401) navigate('/login');
-      }
-    }
-    fetchDepartments();
-    return () => controller.abort();
-  }, [isAdminGeral, navigate]);
-
-  // 2. Busca reativa higienizando rigorosamente os parâmetros de Query
- const fetchReportData = useCallback(async () => {
+  const fetchReport = useCallback(() => {
+    setLoadingReport(true);
     try {
-      setLoadingData(true);
-      
-      const month = selectedMonth ? parseInt(selectedMonth, 10) : new Date().getMonth() + 1;
-      const year = selectedYear ? parseInt(selectedYear, 10) : new Date().getFullYear();
-      
-      const params: Record<string, any> = { month, year };
-
-      if (isAdminGeral) {
-        if (selectedUnit && selectedUnit !== 'todas' && selectedUnit.trim() !== '') {
-          params.departmentId = selectedUnit.trim();
-        }
-      } else if (loggedUser?.departmentId) {
-        params.departmentId = loggedUser.departmentId.trim();
-      }
-
-      const { data } = await api.get<ManagementReport>('/demands/reports/management', { params });
-      setReportData(data);
-    } catch (err) {
-      console.error('API recusou os parâmetros (HTTP 400):', err);
-      // Reseta o estado para evitar que o gráfico tente renderizar lixo ou trave a tela
-      setReportData(null); 
+      const r = buildReport(allDemands, orgUnits, specialties, startDate, endDate, departmentIds, statuses, techTypeCodes, onlyUnassigned, onlyCritical, includeDemandList);
+      setReport(r);
+    } catch {
+      notifications.show({ title: 'Erro ao gerar relatório', message: 'Revise os filtros e tente novamente.', color: 'red' });
     } finally {
-      setLoadingData(false);
+      setLoadingReport(false);
     }
-  }, [selectedMonth, selectedYear, selectedUnit, isAdminGeral, loggedUser]);
+  }, [allDemands, orgUnits, specialties, startDate, endDate, departmentIds, statuses, techTypeCodes, onlyUnassigned, onlyCritical, includeDemandList]);
 
-  // Dispara a busca sempre que um filtro sofrer mutação
   useEffect(() => {
-    fetchReportData();
-  }, [fetchReportData]);
+    if (!loadingOptions) fetchReport();
+  }, [loadingOptions]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Modificadores de estado que evitam flickering limpando buffers antigos
-  const handleMonthChange = (val: string | null) => {
-    if (val) {
-      setReportData(null);
-      setSelectedMonth(val);
+  const departmentOptions = useMemo<Option[]>(() => {
+    if (!isAdminGeral && user?.departmentId) {
+      const mine = orgUnits.find(u => u.id === user.departmentId);
+      return mine ? [{ value: mine.id, label: `${mine.code} - ${mine.name}` }] : [];
     }
-  };
+    return orgUnits.map(u => ({ value: u.id, label: `${u.code} - ${u.name}` }));
+  }, [orgUnits, isAdminGeral, user?.departmentId]);
 
-  const handleYearChange = (val: string | null) => {
-    if (val) {
-      setReportData(null);
-      setSelectedYear(val);
-    }
-  };
+  const categoryOptions = useMemo<Option[]>(() => specialties.map(s => ({ value: s.id, label: `${s.code} - ${s.name}` })), [specialties]);
 
-  const handleUnitChange = (val: string | null) => {
-    if (val) {
-      setReportData(null);
-      setSelectedUnit(val);
-    }
-  };
+  const statusOptions: Option[] = [
+    { value: 'TODO', label: 'A Fazer' },
+    { value: 'IN_PROGRESS', label: 'Em Andamento' },
+    { value: 'DONE', label: 'Concluído' },
+    { value: 'INTERRUPTED', label: 'Interrompido' },
+  ];
 
-  // 3. Geração de PDF integrada à rota mapeada no Swagger
-  const handleExportPDF = async () => {
-    try {
-      setExporting(true);
-      
-      const month = selectedMonth ? parseInt(selectedMonth, 10) : new Date().getMonth() + 1;
-      const year = selectedYear ? parseInt(selectedYear, 10) : new Date().getFullYear();
+  const kpis = [
+    { label: 'Demandas', value: report?.metrics.total ?? 0, icon: IconChartBar, color: 'blue' },
+    { label: 'Resolução', value: `${report?.metrics.resolutionRate ?? 0}%`, icon: IconUsers, color: 'green' },
+    { label: 'Sem técnico', value: `${report?.metrics.unassigned ?? 0} (${report?.metrics.unassignedRate ?? 0}%)`, icon: IconAlertTriangle, color: 'orange' },
+    { label: 'Interrompidas', value: report?.metrics.interrupted ?? 0, icon: IconClock, color: 'grape' },
+  ];
 
-      const targetUnitName = selectedUnit === 'todas' 
-        ? 'Geral_Municipio' 
-        : departments.find(d => d.id === selectedUnit)?.name?.replace(/\s+/g, '_') || 'Secretaria';
-
-      const params: Record<string, any> = { month, year };
-      
-      if (isAdminGeral) {
-        if (selectedUnit && selectedUnit !== 'todas') {
-          params.departmentId = selectedUnit.trim();
-        }
-      } else if (loggedUser?.departmentId) {
-        params.departmentId = loggedUser.departmentId.trim();
-      }
-
-      const response = await api.get('/demands/reports/export-pdf', {
-        params,
-        responseType: 'blob'
-      });
-
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `Relatorio_SAGED_${targetUnitName}_${month}_${year}.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err: any) {
-      console.error('Falha ao exportar PDF:', err);
-      alert('Não foi possível exportar o documento impresso.');
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  // Memoizações estruturais para os gráficos e cards
-  const kpiCards = useMemo(() => {
-    return [
-      { title: 'Total de Demandas', value: reportData?.metrics?.total ?? 0, icon: IconChecklist, color: 'blue' },
-      { title: 'Tempo Médio (TMA)', value: reportData?.metrics?.avgTime ?? '0h', icon: IconClock, color: 'green' },
-      { title: 'Taxa de Resolução', value: reportData?.metrics?.resolutionRate ? `${reportData.metrics.resolutionRate}%` : '0%', icon: IconTrendingUp, color: 'grape' },
-      { title: 'Interrompidas', value: reportData?.metrics?.interrupted ?? 0, icon: IconAlertTriangle, color: 'red' },
-    ];
-  }, [reportData]);
-
-  const distributionSections = useMemo<DistributionSection[]>(() => {
-    if (!reportData?.statusCounts) return [];
-    
-    const counts = reportData.statusCounts;
-    const total = Object.values(counts).reduce((acc, curr) => acc + curr, 0);
-    if (total === 0) return [];
-
-    const colorsMap: Record<string, string> = {
-      A_FAZER: '#228be6',
-      EM_ANDAMENTO: '#ff922b',
-      CONCLUIDO: '#2b8a3e',
-      INTERROMPIDO: '#e03131',
-      CANCELADO: '#868e96'
+  const ringSections = useMemo(() => {
+    if (!report || report.metrics.total === 0) return [{ value: 100, color: 'gray.2' }];
+    const colors: Record<string, string> = {
+      TODO: 'blue.6', IN_PROGRESS: 'orange.6', DONE: 'green.7', INTERRUPTED: 'red.7',
     };
+    return Object.entries(report.statusCounts)
+      .filter(([, count]) => count > 0)
+      .map(([status, count]) => ({
+        value: Math.round((count / report.metrics.total) * 100),
+        color: colors[status] ?? 'gray.5',
+      }));
+  }, [report]);
 
-    return Object.entries(counts).map(([status, value]) => {
-      const percentage = Math.round((value / total) * 100);
-      return {
-        value: percentage,
-        color: colorsMap[status] || '#228be6',
-        label: status.replace('_', ' ')
-      };
-    });
-  }, [reportData]);
-
-  const chartMockData = useMemo(() => {
-    if (reportData?.timelineData && reportData.timelineData.length > 0) {
-      return reportData.timelineData;
-    }
-    
-    const total = reportData?.metrics?.total ?? 0;
-    const resRate = parseFloat(reportData?.metrics?.resolutionRate || '0');
-    const concluidos = Math.round(total * (resRate / 100));
-    
-    return [
-      { period: 'Semana 1', chamados: Math.round(total * 0.2), concluidos: Math.round(concluidos * 0.1) },
-      { period: 'Semana 2', chamados: Math.round(total * 0.5), concluidos: Math.round(concluidos * 0.3) },
-      { period: 'Semana 3', chamados: Math.round(total * 0.8), concluidos: Math.round(concluidos * 0.7) },
-      { period: 'Semana 4', chamados: total, concluidos: concluidos },
-    ];
-  }, [reportData]);
-
-  const selectUnitOptions = useMemo(() => {
-    if (!isAdminGeral && loggedUser?.departmentId) {
-      return [{ value: loggedUser.departmentId, label: 'SUA SECRETARIA VINCULADA' }];
-    }
-    const baseOptions = [{ value: 'todas', label: 'TODAS AS UNIDADES' }];
-    departments.forEach(d => baseOptions.push({ value: d.id, label: d.name.toUpperCase() }));
-    return baseOptions;
-  }, [departments, loggedUser, isAdminGeral]);
+  if (loadingOptions) {
+    return <Center h="100vh"><Loader color="green" /></Center>;
+  }
 
   return (
-    <Box style={{ backgroundColor: '#f1f3f5', minHeight: '100vh', paddingTop: '100px', paddingBottom: '60px' }}>
-      <Container size={1200} px="xl">
-        
-        <Paper withBorder p="xl" radius="sm" mb="xl" shadow="sm">
-          <Group justify="space-between" align="flex-end">
-            <Stack gap={5}>
-              <Title order={2} style={{ fontWeight: 900, color: '#004a29', letterSpacing: '-1px', fontSize: '28px' }}>
-                Relatórios Operacionais
-              </Title>
-              <Text size="sm" c="dimmed" fw={500}>Métricas em tempo real extraídas do painel SAGED</Text>
+    <Box bg="gray.0" mih="100vh" pt={100} pb={60}>
+      <TourPageGate phaseId="reports" />
+      <Container size="xl">
+        <Paper withBorder p="xl" radius="sm" shadow="sm" mb="lg">
+          <Group justify="space-between" align="flex-start">
+            <Stack gap={4}>
+              <Title order={2} c="crateus-green.9" fw={900}>Relatório Gerencial Completo</Title>
+              <Text size="sm" c="dimmed">Monte filtros, visualize indicadores e acompanhe o desempenho operacional.</Text>
             </Stack>
-
-            <Group align="flex-end" gap="md">
-              <Select
-                label="Mês"
-                value={selectedMonth}
-                onChange={handleMonthChange}
-                size="sm"
-                w={140}
-                allowDeselect={false}
-                data={[
-                  { value: '1', label: 'Janeiro' }, { value: '2', label: 'Fevereiro' },
-                  { value: '3', label: 'Março' }, { value: '4', label: 'Abril' },
-                  { value: '5', label: 'Maio' }, { value: '6', label: 'Junho' },
-                  { value: '7', label: 'Julho' }, { value: '8', label: 'Agosto' },
-                  { value: '9', label: 'Setembro' }, { value: '10', label: 'Outubro' },
-                  { value: '11', label: 'Novembro' }, { value: '12', label: 'Dezembro' }
-                ]}
-              />
-              <Select
-                label="Ano"
-                value={selectedYear}
-                onChange={handleYearChange}
-                size="sm"
-                w={110}
-                allowDeselect={false}
-                data={[{ value: '2026', label: '2026' }, { value: '2027', label: '2027' }]}
-              />
-              <Select
-                label="Unidade"
-                value={selectedUnit}
-                onChange={handleUnitChange}
-                disabled={!isAdminGeral}
-                size="sm"
-                w={230}
-                allowDeselect={false}
-                data={selectUnitOptions}
-              />
-              <Button 
-                leftSection={exporting ? <Loader size={16} color="white" /> : <IconDownload size={18} />} 
-                variant="filled" 
-                size="sm" 
-                h={36}
-                disabled={loadingData || exporting}
-                onClick={handleExportPDF}
-                style={{ backgroundColor: '#004a29' }}
-              >
-                {exporting ? 'Gerando...' : 'Exportar PDF'}
+            <Group>
+              <Button leftSection={<IconFilter size={16} />} variant="light" color="green" loading={loadingReport} onClick={fetchReport} data-tour="reports-filters">
+                Pré-visualizar
+              </Button>
+              <Button leftSection={<IconDownload size={16} />} color="green.8" disabled data-tour="reports-export">
+                Exportar PDF
               </Button>
             </Group>
           </Group>
         </Paper>
 
-        {loadingData && !reportData ? (
-          <Center h={400}><Loader color="green.9" size="xl" /></Center>
-        ) : (
-          <>
-            <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="lg" mb="xl">
-              {kpiCards.map((stat) => (
-                <Paper key={stat.title} withBorder p="xl" radius="sm" shadow="sm">
-                  <Group justify="space-between">
-                    <Stack gap={0}>
-                      <Text size="xs" c="dimmed" fw={800} tt="uppercase" lts="0.5px">{stat.title}</Text>
-                      <Text size="24px" fw={900} style={{ color: '#2e2e2e' }}>{stat.value}</Text>
-                    </Stack>
-                    <stat.icon size={36} color={`var(--mantine-color-${stat.color}-6)`} stroke={1.5} />
-                  </Group>
-                </Paper>
-              ))}
-            </SimpleGrid>
+        <Grid align="flex-start">
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <Paper withBorder p="lg" radius="sm" shadow="sm">
+              <Title order={4} fw={900} c="green.9" mb="md">Filtros</Title>
+              <Stack>
+                <SimpleGrid cols={2}>
+                  <TextInput label="Data inicial" type="date" value={startDate} onChange={e => setStartDate(e.currentTarget.value)} />
+                  <TextInput label="Data final" type="date" value={endDate} onChange={e => setEndDate(e.currentTarget.value)} />
+                </SimpleGrid>
+                <MultiSelect
+                  label="Secretarias"
+                  placeholder="Todas permitidas"
+                  data={departmentOptions}
+                  value={departmentIds}
+                  onChange={setDepartmentIds}
+                  searchable
+                  clearable
+                  disabled={!isAdminGeral}
+                />
+                <MultiSelect label="Status" placeholder="Todos" data={statusOptions} value={statuses} onChange={setStatuses} clearable />
+                <MultiSelect label="Categoria de demanda" placeholder="Todas" data={categoryOptions} value={techTypeCodes} onChange={setTechTypeCodes} searchable clearable />
+                <Divider />
+                <Checkbox label="Somente demandas sem técnico assumido" checked={onlyUnassigned} onChange={e => setOnlyUnassigned(e.currentTarget.checked)} />
+                <Checkbox label="Somente demandas críticas/atenção" checked={onlyCritical} onChange={e => setOnlyCritical(e.currentTarget.checked)} />
+                <Checkbox label="Incluir lista analítica de demandas" checked={includeDemandList} onChange={e => setIncludeDemandList(e.currentTarget.checked)} />
+              </Stack>
+            </Paper>
+          </Grid.Col>
 
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 8 }}>
-                <Paper withBorder p="25px" radius="sm" shadow="sm" h={450}>
-                  <Title order={5} mb="md" fw={800} c="gray.8">Fluxo de Chamados Analítico</Title>
-                  <Text size="xs" c="dimmed" mb="xl" fw={500}>
-                    Comparativo entre demandas abertas e concluídas no período {reportData?.period || ''}
-                  </Text>
-                  
-                  {/* Div anti-erro dimensionamento da biblioteca Recharts */}
-                  <Box h={300} style={{ minWidth: 0, width: '100%', position: 'relative' }}>
-                    {reportData ? (
+          <Grid.Col span={{ base: 12, md: 8 }}>
+            {loadingReport ? (
+              <Center h={360}><Loader color="green" /></Center>
+            ) : !report ? (
+              <Paper withBorder p="xl" radius="sm"><Text c="dimmed">Gere uma prévia para visualizar o relatório.</Text></Paper>
+            ) : (
+              <Stack>
+                <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} data-tour="reports-stats">
+                  {kpis.map(kpi => (
+                    <Paper key={kpi.label} withBorder p="lg" radius="sm" shadow="xs">
+                      <Group justify="space-between">
+                        <Stack gap={0}>
+                          <Text size="xs" c="dimmed" fw={800} tt="uppercase">{kpi.label}</Text>
+                          <Text size="xl" fw={900}>{kpi.value}</Text>
+                        </Stack>
+                        <kpi.icon size={30} />
+                      </Group>
+                    </Paper>
+                  ))}
+                </SimpleGrid>
+
+                <Grid>
+                  <Grid.Col span={{ base: 12, md: 7 }}>
+                    <Paper withBorder p="lg" radius="sm" shadow="xs" h={360}>
+                      <Title order={5} fw={900} mb="sm">Fluxo do Período</Title>
                       <AreaChart
                         h={280}
-                        data={chartMockData}
+                        data={report.timelineData}
                         dataKey="period"
                         series={[
-                          { name: 'chamados', color: 'blue.6', label: 'Demandas Abertas' },
-                          { name: 'concluidos', color: 'green.6', label: 'Demandas Concluídas' }
+                          { name: 'opened', color: 'blue.6', label: 'Abertas' },
+                          { name: 'concluded', color: 'green.7', label: 'Concluídas' },
                         ]}
                         curveType="monotone"
-                        gridAxis="xy"
                         withLegend
                       />
-                    ) : (
-                      <Center h={280}><Loader size="sm" color="blue" /></Center>
-                    )}
-                  </Box>
-                </Paper>
-              </Grid.Col>
+                    </Paper>
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 5 }}>
+                    <Paper withBorder p="lg" radius="sm" shadow="xs" h={360}>
+                      <Title order={5} fw={900} mb="sm">Distribuição por Status</Title>
+                      <Center>
+                        <RingProgress
+                          size={190}
+                          thickness={20}
+                          sections={ringSections}
+                          label={<Text ta="center" fw={900}>{report.metrics.total}</Text>}
+                        />
+                      </Center>
+                      <SimpleGrid cols={2}>
+                        {Object.entries(report.statusCounts).map(([status, count]) => (
+                          <Group key={status} gap={6}>
+                            <Badge variant="light">{count}</Badge>
+                            <Text size="xs">{STATUS_LABELS[status] ?? status}</Text>
+                          </Group>
+                        ))}
+                      </SimpleGrid>
+                    </Paper>
+                  </Grid.Col>
+                </Grid>
 
-              <Grid.Col span={{ base: 12, md: 4 }}>
-                <Paper withBorder p="25px" radius="sm" shadow="sm" h={450}>
-                  <Title order={5} mb="xl" fw={800} c="gray.8">Demandas por Status</Title>
-                  <Stack align="center" justify="center" h="100%" gap="xl">
-                    <RingProgress
-                      size={180}
-                      thickness={20}
-                      roundCaps
-                      sections={distributionSections.length > 0 ? distributionSections : [{ value: 100, color: 'gray.2' }]}
-                      label={
-                        <Center>
-                          <Text fw={900} size="md" c="dark">Status</Text>
-                        </Center>
-                      }
-                    />
-                    <SimpleGrid cols={2} w="100%" px="sm">
-                      {distributionSections.map((sec, idx) => (
-                        <Group gap={6} key={idx}>
-                          <Box w={10} h={10} style={{ backgroundColor: sec.color, borderRadius: '50%' }} /> 
-                          <Text size="11px" fw={600} style={{ textTransform: 'capitalize' }}>{sec.label} ({sec.value}%)</Text>
-                        </Group>
-                      ))}
-                    </SimpleGrid>
-                  </Stack>
-                </Paper>
-              </Grid.Col>
+                <BreakdownTable title="Resumo por Secretaria" rows={report.departments} empty="Nenhuma secretaria no filtro." />
+                <BreakdownTable title="Categorias de Demanda" rows={report.categories} empty="Nenhuma categoria no filtro." />
 
-              <Grid.Col span={12}>
-                <Paper withBorder p="xl" radius="sm" shadow="sm">
-                  <Group justify="space-between" mb="lg">
-                    <Title order={5} fw={800} c="gray.8">Produtividade da Equipe Técnica</Title>
-                    <Badge size="lg" color="green.9" c='white' variant="light" radius="sm">
-                      Escopo: {reportData?.scope || 'Geral'}
-                    </Badge>
+                <Paper withBorder p="lg" radius="sm" shadow="xs">
+                  <Group justify="space-between" mb="sm">
+                    <Title order={5} fw={900}>Demandas Críticas / Atenção</Title>
+                    <Badge color="red" variant="light">{report.criticalDemands.length}</Badge>
                   </Group>
-                  <Divider mb="lg" />
-                  <Stack gap="md">
-                    {reportData?.technicians && reportData.technicians.length > 0 ? (
-                      reportData.technicians.map((tec, index) => (
-                        <Group 
-                          key={index} 
-                          justify="space-between" 
-                          p="md" 
-                          style={{ 
-                            backgroundColor: index === 0 ? '#f8fff9' : '#fff', 
-                            border: '1px solid #f1f1f1',
-                            borderRadius: '8px' 
-                          }}
-                        >
-                          <Group gap={6}>
-                            <Text size="md" fw={900} c={index === 0 ? 'green.9' : 'gray.5'}>0{index + 1}</Text>
-                            <Text size="sm" fw={700} c="gray.8">{tec.name}</Text>
-                          </Group>
-                          <Group gap={40}>
-                            <Stack gap={0} align="center">
-                              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Total Atribuído</Text>
-                              <Text size="sm" fw={800}>{tec.count}</Text>
-                            </Stack>
-                            <Stack gap={0} align="center">
-                              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Concluídos</Text>
-                              <Badge variant="filled" color="green.9" radius="xs" size="sm">{tec.concluded} chamados</Badge>
-                            </Stack>
-                          </Group>
-                        </Group>
-                      ))
-                    ) : (
-                      <Text size="sm" c="dimmed" style={{ textAlign: 'center' }} py="xl">
-                        Nenhum técnico com demandas registradas neste escopo.
-                      </Text>
-                    )}
-                  </Stack>
+                  <DemandTable rows={report.criticalDemands} />
                 </Paper>
-              </Grid.Col>
-            </Grid>
-          </>
-        )}
+
+                {includeDemandList && (
+                  <Paper withBorder p="lg" radius="sm" shadow="xs">
+                    <Group justify="space-between" mb="sm">
+                      <Title order={5} fw={900}>Detalhamento Analítico</Title>
+                      <Badge color="green" variant="light">{report.demands.length}</Badge>
+                    </Group>
+                    <DemandTable rows={report.demands.slice(0, 80)} />
+                    {report.demands.length > 80 && (
+                      <Text size="xs" c="dimmed" mt="sm">Prévia limitada a 80 linhas.</Text>
+                    )}
+                  </Paper>
+                )}
+              </Stack>
+            )}
+          </Grid.Col>
+        </Grid>
       </Container>
     </Box>
+  );
+}
+
+function BreakdownTable({ title, rows, empty }: { title: string; rows: Breakdown[]; empty: string }) {
+  return (
+    <Paper withBorder p="lg" radius="sm" shadow="xs">
+      <Title order={5} fw={900} mb="sm">{title}</Title>
+      {rows.length === 0 ? (
+        <Text size="sm" c="dimmed">{empty}</Text>
+      ) : (
+        <Table striped highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Nome</Table.Th>
+              <Table.Th>Total</Table.Th>
+              <Table.Th>Concluídas</Table.Th>
+              <Table.Th>Pendentes</Table.Th>
+              <Table.Th>Sem técnico</Table.Th>
+              <Table.Th>Carga</Table.Th>
+              <Table.Th>Resolução</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {rows.slice(0, 10).map(row => (
+              <Table.Tr key={row.id}>
+                <Table.Td><Text size="sm" fw={700}>{row.name}</Text></Table.Td>
+                <Table.Td>{row.total}</Table.Td>
+                <Table.Td>{row.concluded}</Table.Td>
+                <Table.Td>{row.pending}</Table.Td>
+                <Table.Td>{row.unassigned}</Table.Td>
+                <Table.Td>{row.sharePercent}%</Table.Td>
+                <Table.Td>{row.resolutionRate}%</Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
+    </Paper>
+  );
+}
+
+function DemandTable({ rows }: { rows: DemandRow[] }) {
+  if (rows.length === 0) return <Text size="sm" c="dimmed">Nenhuma demanda encontrada.</Text>;
+  return (
+    <Table striped highlightOnHover>
+      <Table.Thead>
+        <Table.Tr>
+          <Table.Th>Protocolo</Table.Th>
+          <Table.Th>Título</Table.Th>
+          <Table.Th>Secretaria</Table.Th>
+          <Table.Th>Status</Table.Th>
+          <Table.Th>Técnico</Table.Th>
+          <Table.Th>Idade (h)</Table.Th>
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
+        {rows.map(row => (
+          <Table.Tr key={row.id}>
+            <Table.Td><Badge variant="light">{row.protocol}</Badge></Table.Td>
+            <Table.Td><Text size="sm" lineClamp={2}>{row.title}</Text></Table.Td>
+            <Table.Td>{row.departmentName}</Table.Td>
+            <Table.Td>{row.statusLabel}</Table.Td>
+            <Table.Td>{row.technicianName ?? 'Sem técnico'}</Table.Td>
+            <Table.Td>{row.ageHours}h</Table.Td>
+          </Table.Tr>
+        ))}
+      </Table.Tbody>
+    </Table>
   );
 }

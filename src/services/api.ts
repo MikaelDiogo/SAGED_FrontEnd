@@ -1,24 +1,36 @@
 import axios from 'axios';
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3333',
-  withCredentials: true, // Permite envio de cookies HttpOnly para autenticação baseada em token
+  baseURL:
+    (import.meta.env.VITE_API_URL as string | undefined) ??
+    'http://localhost:8080/api/v1/saged',
 });
 
-// O interceptor de request foi removido para evitar o envio manual de headers de privilégio (RBAC Bypass).
-// Agora o backend identifica o usuário e seu papel estritamente através do Cookie HttpOnly 'token'.
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
+api.interceptors.request.use((config) => {
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
+  }
+  if (!config.headers['X-Correlation-Id']) {
+    config.headers['X-Correlation-Id'] = crypto.randomUUID();
+  }
+  return config;
+});
 
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    const isMeRoute = error.config?.url?.includes('/sessions/me');
-
-    // Se o backend responder 401, significa que o Cookie expirou ou é inválido.
-    // Mas NÃO redirecionamos se for a rota de verificação inicial, para evitar loops.
-    if (error.response?.status === 401 && !isMeRoute) {
-      localStorage.removeItem('@SAGE:user');
-      window.location.href = '/login'; 
+    if (error.response?.status === 401) {
+      window.dispatchEvent(new Event('saged:unauthorized'));
     }
+    // Extract Problem Details (RFC 7807) message when available
+    const detail = error.response?.data?.detail as string | undefined;
+    if (detail) error.message = detail;
     return Promise.reject(error);
   }
 );

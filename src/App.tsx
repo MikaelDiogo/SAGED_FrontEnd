@@ -1,6 +1,7 @@
 import { MantineProvider, createTheme } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
-import { AuthProvider } from './contexts/AuthProvider'; // Importe o seu Provider
+import { AuthProvider } from './contexts/AuthProvider';
+import { UnitProvider } from './contexts/UnitContext';
 import { AppRoutes } from './routes/AppRoutes';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css'; // Não esqueça do CSS das notificações!
@@ -23,11 +24,13 @@ const theme = createTheme({
 export default function App() {
   return (
     // O AuthProvider deve envolver a aplicação para que as rotas saibam quem está logado
-    <AuthProvider> 
-      <MantineProvider theme={theme}>
-        <Notifications />
-        <AppRoutes />
-      </MantineProvider>
+    <AuthProvider>
+      <UnitProvider>
+        <MantineProvider theme={theme}>
+          <Notifications />
+          <AppRoutes />
+        </MantineProvider>
+      </UnitProvider>
     </AuthProvider>
   );
 }

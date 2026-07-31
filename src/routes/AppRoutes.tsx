@@ -9,17 +9,17 @@ import { SelectQueue } from '../pages/SelectQueue';
 import { Login } from '../pages/Login';
 import { Reports } from '../pages/Reports';
 import { CreateDemand } from '../pages/CreateDemand';
-import { CreateTechnician } from '../pages/CreateTechnician';
+import { ManageTelegramNumbers } from '../pages/ManageTelegramNumbers';
 import { ProtectedRoute } from '../components/ProtectedRoute';
+import { TourProvider } from '../components/Tour';
+import { CreateTechnician } from '../pages/CreateTechnician';
 import { Center, Loader } from '@mantine/core';
 
 function InitialRedirect() {
   const { user } = useContext(AuthContext);
   if (!user) return <Navigate to="/login" replace />;
-  
-  const role = user.role?.trim().toUpperCase();
-  
-  if (role === 'ADMIN_GERAL') {
+
+  if (user.role === 'SAGED_ADMIN_GERAL') {
     return <Navigate to="/selecionar-unidade" replace />;
   }
 
@@ -39,49 +39,64 @@ export function AppRoutes() {
 
   return (
     <BrowserRouter>
+      <TourProvider>
       <Routes>
-        {/* Rota Pública de Autenticação */}
-        <Route 
-          path="/login" 
-          element={isAuthenticated ? <InitialRedirect /> : <Login />} 
+        <Route
+          path="/login"
+          element={isAuthenticated ? <InitialRedirect /> : <Login />}
         />
 
-        {/* Grupo de Rotas Privadas e Protegidas via RBAC */}
-        <Route 
-          path="/" 
+        <Route
+          path="/"
           element={
             <ProtectedRoute>
               <DefaultLayout />
             </ProtectedRoute>
           }
         >
-          {/* Redirecionamento Inicial inteligente com base no Perfil */}
           <Route index element={<InitialRedirect />} />
-          
+
           <Route path="selecionar-unidade" element={<SelectUnit />} />
           <Route path="selecionar-fila" element={<SelectQueue />} />
           <Route path="dashboard" element={<Dashboard />} />
-          <Route 
-            path="relatorios" 
+          <Route
+            path="relatorios"
             element={
-              <ProtectedRoute allowedRoles={['ADMIN_GERAL', 'ADMIN_SETOR', 'TECNICO_LIDER']}>
+              <ProtectedRoute
+                allowedRoles={[
+                  'SAGED_ADMIN_GERAL',
+                  'SAGED_ADMIN_SETOR',
+                  'SAGED_TECNICO_LIDER',
+                ]}
+              >
                 <Reports />
               </ProtectedRoute>
-            } 
+            }
           />
           <Route path="demandas" element={<Demands />} />
-          <Route path="novo-chamado" element={<CreateDemand />} /> 
-          <Route 
-            path="gerenciar-tecnicos" 
+          <Route path="novo-chamado" element={<CreateDemand />} />
+          <Route
+            path="gerenciar-numeros"
             element={
-              <ProtectedRoute allowedRoles={['ADMIN_GERAL', 'ADMIN_SETOR']}><CreateTechnician /></ProtectedRoute>
-            } 
+              <ProtectedRoute allowedRoles={['SAGED_ADMIN_GERAL', 'SAGED_ADMIN_SETOR']}>
+                <ManageTelegramNumbers />
+              </ProtectedRoute>
+            }
           />
+          <Route
+            path="gerenciar-tecnicos"
+            element={
+              <ProtectedRoute allowedRoles={['SAGED_ADMIN_GERAL', 'SAGED_ADMIN_SETOR']}>
+                <CreateTechnician />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="usuarios-telegram" element={<Navigate to="/gerenciar-numeros" replace />} />
         </Route>
 
-        {/* Fallback de rotas inexistentes redirecionando para a Autenticação */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </TourProvider>
     </BrowserRouter>
   );
 }

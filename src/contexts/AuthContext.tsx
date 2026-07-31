@@ -1,8 +1,8 @@
 import { createContext } from 'react';
-import type { User, SignInCredentials } from '../types';
+import type { User } from '../types';
 
 export interface AuthContextData {
-  signIn: (credentials: SignInCredentials) => Promise<void>;
+  signIn: () => void;
   signOut: () => void;
   user: User | null;
   isAuthenticated: boolean;

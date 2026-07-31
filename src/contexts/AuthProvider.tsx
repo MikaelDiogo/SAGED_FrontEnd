@@ -1,54 +1,86 @@
-import { useState, useEffect, type ReactNode } from 'react';
-import type { User, SignInCredentials } from '../types';
-import { api } from '../services/api';
+import { type ReactNode, useEffect } from 'react';
+import { AuthProvider as OidcProvider, useAuth } from 'react-oidc-context';
 import { AuthContext } from './AuthContext';
+import type { User, SagedRole } from '../types';
+import { setAccessToken } from '../services/api';
+import { oidcConfig } from '../auth/oidcConfig';
 
-interface AuthProviderProps {
-  children: ReactNode;
+const SAGED_ROLES: SagedRole[] = [
+  'SAGED_ADMIN_GERAL',
+  'SAGED_ADMIN_SETOR',
+  'SAGED_TECNICO_LIDER',
+  'SAGED_TECNICO',
+];
+
+function extractRole(roles: string[] | undefined): SagedRole {
+  return SAGED_ROLES.find((r) => roles?.includes(r)) ?? 'SAGED_TECNICO';
 }
 
-export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+function decodeJwt(token: string): Record<string, unknown> {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(payload)) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function SagedContextBridge({ children }: { children: ReactNode }) {
+  const auth = useAuth();
 
   useEffect(() => {
-    api.get('/sessions/me')
-      .then(res => {
-        const userData = res.data.user;
-        setUser(userData);
-        localStorage.setItem('@SAGE:user', JSON.stringify(userData));
-      })
-      .catch(() => {
-        setUser(null);
-        localStorage.removeItem('@SAGE:user');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    setAccessToken(auth.user?.access_token ?? null);
+  }, [auth.user]);
 
-  const isAuthenticated = !!user;
+  // Claims that matter (roles, org, specialty) live in the access token, not the ID token
+  const accessClaims = auth.user?.access_token
+    ? decodeJwt(auth.user.access_token)
+    : {};
 
-  async function signIn({ email, password }: SignInCredentials) {
-    const response = await api.post('/sessions', { email, password });
-    const { user: userData } = response.data;
+  const profile = auth.user?.profile;
+  const realmRoles = (
+    accessClaims.realm_access as { roles?: string[] } | undefined
+  )?.roles;
 
-    localStorage.setItem('@SAGE:user', JSON.stringify(userData));
-
-    setUser(userData);
-  }
-
-  const signOut = async () => {
-    try {
-      await api.delete('/sessions');
-    } catch {
-      // ignora erro de rede, prossegue com limpeza local
-    }
-    localStorage.removeItem('@SAGE:user');
-    setUser(null);
-  };
+  const user: User | null =
+    auth.isAuthenticated && profile
+      ? {
+          id: (accessClaims.sub as string | undefined) ?? profile.sub ?? '',
+          name:
+            (accessClaims.name as string | undefined) ??
+            (accessClaims.preferred_username as string | undefined) ??
+            (profile.name as string | undefined) ??
+            (profile.preferred_username as string | undefined) ??
+            '',
+          email:
+            (accessClaims.email as string | undefined) ??
+            (profile.email as string | undefined) ??
+            '',
+          role: extractRole(realmRoles),
+          departmentId: accessClaims.org_unit_id as string | undefined,
+          specialtyCodes: accessClaims.specialty_codes as string | undefined,
+        }
+      : null;
 
   return (
-    <AuthContext.Provider value={{ signIn, signOut, user, isAuthenticated, loading }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated: auth.isAuthenticated,
+        loading: auth.isLoading,
+        signIn: () => void auth.signinRedirect(),
+        signOut: () => void auth.signoutRedirect(),
+      }}
+    >
       {children}
     </AuthContext.Provider>
+  );
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  return (
+    <OidcProvider {...oidcConfig}>
+      <SagedContextBridge>{children}</SagedContextBridge>
+    </OidcProvider>
   );
 }

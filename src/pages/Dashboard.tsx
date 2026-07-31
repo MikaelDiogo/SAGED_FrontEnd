@@ -14,53 +14,56 @@ import { api } from '../services/api';
 import { StatCard } from '../components/StatCard';
 import { AuthContext } from '../contexts/AuthContext';
 import { TechActivity } from '../components/TechActivity';
-import type { Demand, StatusType } from '../pages/Demands';
-import type { User as BaseUser } from '../types';
+import { TourPageGate } from '../components/Tour';
+import { buildDemandsUrl } from '../utils/demandNavigation';
+import type { Demand } from '../pages/Demands';
+import type { StatusType } from '../types';
 
-// Interface estendida baseada exatamente no esquema 'UserPublic' do Swagger
-interface ExtendedUser extends BaseUser {
-  role: 'ADMIN_GERAL' | 'ADMIN_SETOR' | 'TECNICO_LIDER' | 'TECNICO';
-  tech_type_code?: string;
-  is_sector_leader: boolean;
-  departmentId?: string;
-}
+interface OrgUnit { id: string; name: string; code: string; }
 
 export function Dashboard() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [allDemands, setAllDemands] = useState<Demand[]>([]);
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   const unitId = searchParams.get('unit');
   const unitName = searchParams.get('name') || 'Secretaria Selecionada';
 
   const { user } = useContext(AuthContext);
-  const loggedUser = user as ExtendedUser | null;
+  
 
-  const roleUpper = useMemo(() => loggedUser?.role?.trim().toUpperCase(), [loggedUser]);
+  const roleUpper = useMemo(() => user?.role?.trim().toUpperCase(), [user]);
   
   // Mapeamento das permissões de acordo com as especificações do Swagger
-  const isAdminGeral = useMemo(() => roleUpper === 'ADMIN_GERAL', [roleUpper]);
-  const isTechnician = useMemo(() => roleUpper === 'TECNICO', [roleUpper]);
+  const isAdminGeral = useMemo(() => roleUpper === 'SAGED_ADMIN_GERAL', [roleUpper]);
+  const isTechnician = useMemo(() => roleUpper === 'SAGED_TECNICO', [roleUpper]);
   const hasSectorView = useMemo(() => {
-    return roleUpper === 'ADMIN_SETOR' || roleUpper === 'TECNICO_LIDER' || loggedUser?.is_sector_leader === true;
-  }, [roleUpper, loggedUser]);
+    return roleUpper === 'SAGED_ADMIN_SETOR' || roleUpper === 'SAGED_TECNICO_LIDER' ;
+  }, [roleUpper]);
 
   // Busca geral robusta baseada no token (o backend filtra o escopo automaticamente via RBAC)
   useEffect(() => {
-    async function loadDemands() {
+    async function loadData() {
       setLoading(true);
       try {
-        const response = await api.get<Demand[]>('/demands');
-        setAllDemands(Array.isArray(response.data) ? response.data : []);
+        const params: Record<string, unknown> = { size: 200 };
+        if (unitId && unitId !== 'geral') params.departmentId = unitId;
+        const [demandsRes, unitsRes] = await Promise.all([
+          api.get<{ content: Demand[] }>('/demands', { params }),
+          api.get<OrgUnit[]>('/org-units'),
+        ]);
+        setAllDemands(Array.isArray(demandsRes.data.content) ? demandsRes.data.content : []);
+        setOrgUnits(Array.isArray(unitsRes.data) ? unitsRes.data : []);
       } catch (error) {
-        console.error("Erro ao buscar demandas para o painel:", error);
+        console.error('Erro ao buscar dados para o painel:', error);
       } finally {
         setLoading(false);
       }
     }
-    loadDemands();
-  }, []);
+    loadData();
+  }, [unitId]);
 
   // ESCOPO DO DASHBOARD: Sincronizado com o retorno real da API
   const demands = useMemo(() => {
@@ -89,8 +92,8 @@ export function Dashboard() {
     const total = demands.length;
     if (total === 0) return { resolutionRate: 0, interruptedCount: 0, criticalPercentage: 0 };
 
-    const completed = demands.filter(d => d.status === 'CONCLUIDO').length;
-    const interrupted = demands.filter(d => d.status === 'INTERROMPIDO').length;
+    const completed = demands.filter(d => d.status === 'DONE').length;
+    const interrupted = demands.filter(d => d.status === 'INTERRUPTED').length;
     
     const critical = interrupted; 
 
@@ -103,29 +106,32 @@ export function Dashboard() {
 
   const counters = useMemo(() => {
     return {
-      aFazer: demands.filter(d => d.status === 'A_FAZER').length,
-      emAndamento: demands.filter(d => d.status === 'EM_ANDAMENTO').length,
-      concluido: demands.filter(d => d.status === 'CONCLUIDO').length,
-      interrompido: demands.filter(d => d.status === 'INTERROMPIDO').length,
+      aFazer: demands.filter(d => d.status === 'TODO').length,
+      emAndamento: demands.filter(d => d.status === 'IN_PROGRESS').length,
+      concluido: demands.filter(d => d.status === 'DONE').length,
+      interrompido: demands.filter(d => d.status === 'INTERRUPTED').length,
     };
   }, [demands]);
 
   const priorityData = useMemo(() => {
+    const total =
+      counters.aFazer + counters.emAndamento + counters.concluido + counters.interrompido;
+    const pct = (count: number) => (total > 0 ? Math.round((count / total) * 100) : 0);
+
     return [
-      { label: 'Retidas (Crítica)', count: counters.interrompido, color: 'red', progress: 85 },
-      { label: 'Em Execução', count: counters.emAndamento, color: 'blue', progress: 60 },
-      { label: 'Aguardando Início', count: counters.aFazer, color: 'yellow', progress: 45 },
-      { label: 'Finalizadas', count: counters.concluido, color: 'green', progress: 25 },
+      { label: 'Aguardando Início', count: counters.aFazer, color: 'yellow', progress: pct(counters.aFazer) },
+      { label: 'Em Andamento', count: counters.emAndamento, color: 'blue', progress: pct(counters.emAndamento) },
+      { label: 'Concluídos', count: counters.concluido, color: 'green', progress: pct(counters.concluido) },
+      { label: 'Retidas', count: counters.interrompido, color: 'red', progress: pct(counters.interrompido) },
     ];
   }, [counters]);
 
   const renderStatusBadge = (status: StatusType) => {
     const configs: Record<StatusType, { color: string; label: string }> = {
-      A_FAZER: { color: 'gray', label: 'A Fazer' },
-      EM_ANDAMENTO: { color: 'blue', label: 'Em Andamento' },
-      CONCLUIDO: { color: 'green', label: 'Concluído' },
-      INTERROMPIDO: { color: 'red', label: 'Interrompido' },
-      CANCELADO: { color: 'dark', label: 'Cancelado' }
+      TODO: { color: 'gray', label: 'A Fazer' },
+      IN_PROGRESS: { color: 'blue', label: 'Em Andamento' },
+      DONE: { color: 'green', label: 'Concluído' },
+      INTERRUPTED: { color: 'red', label: 'Interrompido' },
     };
     const current = configs[status] || { color: 'gray', label: status };
     return <Badge color={current.color} size="xs" variant="light">{current.label}</Badge>;
@@ -133,6 +139,7 @@ export function Dashboard() {
 
   return (
     <Container size="xl" pt={100} pb={80}>
+      <TourPageGate phaseId="header-dashboard" />
       <Stack gap="lg">
         
         {isAdminGeral && (
@@ -155,12 +162,16 @@ export function Dashboard() {
           <Stack gap={4}>
             <Group gap="xs">
               {isTechnician ? (
-                <Badge color={loggedUser?.is_sector_leader ? "teal.8" : "blue.8"} variant="filled" radius="sm">
-                  {loggedUser?.is_sector_leader ? "VISÃO LÍDER DE SECRETARIA" : "PAINEL TÉCNICO: MEUS CHAMADOS"}
+                <Badge color="blue.8" variant="filled" radius="sm">
+                  {"PAINEL TECNICO: MEUS CHAMADOS"}
                 </Badge>
               ) : hasSectorView ? (
                 <Badge color="green.8" variant="filled" radius="sm">
                   FILA DA SECRETARIA: {displayUnitName.toUpperCase()}
+                </Badge>
+              ) : isAdminGeral && unitId && unitId !== 'geral' ? (
+                <Badge color="green.9" variant="filled" radius="sm">
+                  {displayUnitName.toUpperCase()}
                 </Badge>
               ) : (
                 <Badge color="green.9" variant="filled" radius="sm">
@@ -178,14 +189,14 @@ export function Dashboard() {
           </Stack>
         </Group>
 
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" data-tour="dashboard-metrics">
           <StatCard label="A Fazer" value={counters.aFazer} color="gray" icon={IconClipboardList} />
           <StatCard label="Em Andamento" value={counters.emAndamento} color="blue" icon={IconPlayerPlay} />
           <StatCard label="Concluído" value={counters.concluido} color="green" icon={IconCheck} />
           <StatCard label="Interrompidas" value={counters.interrompido} color="red" icon={IconAlertTriangle} />
         </SimpleGrid>
 
-        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md" data-tour="dashboard-performance">
           <Paper withBorder p="md" radius="md" shadow="xs" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Stack gap={2}>
               <Text fw={800} size="xs" tt="uppercase" c="gray.7">Taxa de Resolução</Text>
@@ -220,7 +231,7 @@ export function Dashboard() {
 
         <Grid columns={12}>
           <Grid.Col span={{ base: 12, md: 4 }}>
-            <Paper withBorder p="xl" radius="md" shadow="xs" h="100%">
+            <Paper withBorder p="xl" radius="md" shadow="xs" h="100%" data-tour="dashboard-distribution">
               <Group justify="space-between" mb="xs">
                 <Text fw={800} size="xs" tt="uppercase" c="gray.7">Distribuição de Carga</Text>
                 <IconTrendingUp size={16} color="gray" />
@@ -242,7 +253,7 @@ export function Dashboard() {
 
           <Grid.Col span={{ base: 12, md: 8 }}>
             <Stack gap="md">
-               <Paper withBorder p="md" radius="md" shadow="xs" style={{ minHeight: '260px' }}>
+               <Paper withBorder p="md" radius="md" shadow="xs" style={{ minHeight: '260px' }} data-tour="dashboard-table">
                   <Text fw={800} size="xs" mb="md" tt="uppercase" c="gray.7">Fluxo Recente de Demandas Vinculadas</Text>
                   {loading ? (
                     <Center py="xl" style={{ height: '180px' }}><Loader size="sm" color="green.8" /></Center>
@@ -263,13 +274,12 @@ export function Dashboard() {
                         <Table.Tbody>
                           {demands.slice(0, 4).map((demand) => (
                               //Entrada clicável para detalhes da demanda, passando o ID da unidade e nome via query params para o filtro na página de demandas
-                            <Table.Tr 
-                              key={demand.id} 
+                            <Table.Tr
+                              key={demand.id}
                               onClick={() => {
-                                const deptId = demand.departmentId;
-                                const deptName = demand.department?.name || 'Secretaria';
-                                navigate(`/demandas?unit=${deptId}&name=${encodeURIComponent(deptName)}`);
-                              }} 
+                                const deptName = orgUnits.find(u => u.id === demand.departmentId)?.name ?? 'Secretaria';
+                                navigate(buildDemandsUrl({ ...demand, department: { name: deptName } }));
+                              }}
                               style={{ cursor: 'pointer' }}
                             >
                               <Table.Td><Text size="xs" fw={800} c="green.9">#{demand.protocol}</Text></Table.Td>
@@ -278,9 +288,9 @@ export function Dashboard() {
                                   <Text size="xs" fw={600} lineClamp={1} style={{ maxWidth: '320px' }}>
                                     {demand.title || demand.description}
                                   </Text>
-                                  {demand.department?.name && (
+                                  {orgUnits.find(u => u.id === demand.departmentId)?.name && (
                                     <Text size="10px" c="dimmed" fw={700}>
-                                      SETOR: {demand.department.name.toUpperCase()}
+                                      SETOR: {orgUnits.find(u => u.id === demand.departmentId)!.name.toUpperCase()}
                                     </Text>
                                   )}
                                 </Stack>
@@ -300,7 +310,7 @@ export function Dashboard() {
                   <Badge variant="dot" color="green">Monitoramento Saged</Badge>
                 </Group>
                 <TechActivity 
-                  techName={loggedUser?.name || "Técnico"} 
+                  techName={user?.name || "Técnico"} 
                   demand={isTechnician ? "Visualização de Fila Operacional Pessoal" : "Supervisão Geral do Painel SAGED"} 
                   status="ONLINE" 
                   time="Agora"

@@ -1,42 +1,25 @@
 import { useContext } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AuthContext } from '../../contexts/AuthContext';
+import type { SagedRole } from '../../types';
 
 interface ProtectedRouteProps {
-  allowedRoles?: string[];
-  allowSectorLeader?: boolean;
+  allowedRoles?: SagedRole[];
   children: React.ReactNode;
 }
 
-export function ProtectedRoute({ 
-  allowedRoles, 
-  allowSectorLeader = false, 
-  children 
-}: ProtectedRouteProps) {
+export function ProtectedRoute({ allowedRoles, children }: ProtectedRouteProps) {
   const { user, isAuthenticated, loading } = useContext(AuthContext);
 
-  if (loading) {
-    return null; // Poderia ser um componente de Loading/Spinner
-  }
+  if (loading) return null;
 
-  // 1. Barreira de Autenticação Global: Se não houver token ou usuário, vai para o Login
   if (!isAuthenticated || !user) {
     return <Navigate to="/login" replace />;
   }
 
-  const userRole = user.role.toUpperCase();
-
-  // 2. Exceção de Escopo: Se for Técnico mas atuar como Líder de Secretaria, concede acesso
-  if (userRole === 'TECNICO' && allowSectorLeader && user.is_sector_leader) {
-    return <>{children}</>;
-  }
-
-  // 3. Validação Hierárquica por RBAC (Role-Based Access Control)
-  if (allowedRoles && !allowedRoles.includes(userRole)) {
-    // Caso tente acessar um recurso fora do seu papel, retorna à segurança do Dashboard
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  // 4. Autorização Concedida: Renderiza os nós filhos (DefaultLayout / Sub-rotas)
   return <>{children}</>;
 }
