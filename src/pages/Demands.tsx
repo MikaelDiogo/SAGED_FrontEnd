@@ -31,6 +31,9 @@ export interface Demand {
   requesterUserId: string;
   assigneeUserId?: string | null;
   currentTechnicalNote?: string | null;
+  equipmentName?: string | null;
+  equipmentModel?: string | null;
+  isRented?: boolean | null;
   departmentId: string;
   createdAt: string;
   updatedAt?: string;
